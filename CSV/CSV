@@ -1,0 +1,6 @@
+solicitador,maquina,descricao,data_solicitacao,data_inicio,data_fim,status,prioridade
+João,MAQ FLEX 1,Troca de cilindro,2026-04-10,,,"Pendente",Alta
+Maria,MAQ CNC 1,Ajuste de corte,2026-04-11,2026-04-12,,Em andamento,Média
+Carlos,MAQ FLEX 2,Vazamento de tinta,2026-04-09,2026-04-09,2026-04-10,Finalizada,Urgente
+Ana,MAQ FLEX 3,Barulho no motor,2026-04-12,,,"Pendente",Baixa
+Pedro,MAQ CNC 2,Falha elétrica,2026-04-13,2026-04-13,,Em andamento,Alta
