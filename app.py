@@ -3,7 +3,7 @@ from datetime import date
 from supabase import create_client
 
 # ── SUPABASE (SECRETS) ─────────────────────────
-SUPABASE_URL = "https://sdbbfozthbgihqaxofig.supabase.co"
+SUPABASE_URL = "sua_chave"
 SUPABASE_KEY = "sua_chave"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
