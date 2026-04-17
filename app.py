@@ -3,8 +3,8 @@ from datetime import date
 from supabase import create_client
 
 # ── SUPABASE (SECRETS) ─────────────────────────
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+SUPABASE_URL = st.secrets["https://sdbbfozthbgihqaxofig.supabase.co"]
+SUPABASE_KEY = st.secrets["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNkYmJmb3p0aGJnaWhxYXhvZmlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMjM4NTUsImV4cCI6MjA5MTg5OTg1NX0.hcgv2UKEmPXLWjyhvjMbUB2Djgua9U09Zg7URRtT80E"]
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
