@@ -24,15 +24,13 @@ def carregar():
         .order("created_at", desc=True) \
         .execute().data
 
-def inserir(dados):
-    supabase.table("solicitacoes_manutencao").insert(dados).execute()
-
-def atualizar(id, dados):
-    supabase.table("solicitacoes_manutencao").update(dados).eq("id", id).execute()
-
-def deletar(id):
-    supabase.table("solicitacoes_manutencao").delete().eq("id", id).execute()
-
+def carregar():
+    try:
+        response = supabase.table("solicitacoes").select("*").execute()
+        return response.data
+    except Exception as e:
+        st.error(f"Erro Supabase: {e}")
+        return []
 # ── MÉTRICAS ───────────────────────────────────
 dados = carregar()
 
