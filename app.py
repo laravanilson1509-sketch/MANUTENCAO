@@ -19,10 +19,9 @@ st.title("🔧 PLANO DE MANUTENÇÃO")
 
 # ── FUNÇÕES ────────────────────────────────────
 def carregar():
-    return supabase.table("solicitacoes_manutencao") \
-        .select("*") \
-        .order("created_at", desc=True) \
-        .execute().data
+    response = supabase.table("solicitacoes").select("*").execute()
+    st.write(response)
+    return response.data
 
 def carregar():
     try:
