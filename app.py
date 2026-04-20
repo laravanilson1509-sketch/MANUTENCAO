@@ -8,12 +8,28 @@ from supabase import create_client, Client
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gestão de Manutenção", layout="wide", page_icon="🔧")
 
-# --- 2. CONEXÃO SEGURA ---
+# --- 2. CONEXÃO SEGURA (CORREÇÃO DE DNS) ---
+# O .strip() remove espaços. O .replace() remove barras finais.
 url_raw = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
 key_raw = st.secrets.get("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
 
 if not url_raw or not key_raw:
-    st.error("❌ Credenciais não encontradas nos Secrets.")
+    st.error("❌ Credenciais não configuradas no Cloud.")
+    st.stop()
+
+# LIMPEZA DOS DADOS: Isso evita o erro 'Name or service not known'
+URL = url_raw.strip().rstrip("/") 
+KEY = key_raw.strip()
+
+@st.cache_resource
+def conectar():
+    # Se a URL estiver errada, o erro aparecerá aqui
+    return create_client(URL, KEY)
+
+try:
+    supabase = conectar()
+except Exception as e:
+    st.error(f"Erro fatal de DNS: {e}")
     st.stop()
 
 URL = url_raw.strip().replace(" ", "")
