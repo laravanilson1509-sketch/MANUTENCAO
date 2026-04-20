@@ -32,12 +32,9 @@ def carregar_listas():
         st.error(f"Erro ao carregar listas: {e}")
         return [], [], []
 
-def carregar_solicitacoes(ordem_por="id"):
+def carregar_solicitacoes(ordem_por="ID"):
     try:
-        # Define a lógica de ordenação
         coluna_sort = 'id'
-        ascendente = False
-        
         if ordem_por == "Prioridade":
             coluna_sort = 'prioridade'
         elif ordem_por == "Data Solicitação":
@@ -45,7 +42,7 @@ def carregar_solicitacoes(ordem_por="id"):
 
         s = supabase.table('solicitacoes').select(
             '*, usuarios(nome), mecanicos(nome), maquinas(nome)'
-        ).order(coluna_sort, desc=not ascendente).execute()
+        ).order(coluna_sort, desc=True).execute()
         return s.data
     except Exception as e:
         st.error(f"Erro ao carregar solicitações: {e}")
@@ -64,21 +61,18 @@ def gerar_excel(dados):
     ws.append(headers)
     for s in dados:
         ws.append([
-            s.get('id'),
-            s.get('data_solicitacao'),
+            s.get('id'), s.get('data_solicitacao'),
             (s.get('usuarios') or {}).get('nome', 'N/A'),
             (s.get('maquinas') or {}).get('nome', 'N/A'),
             (s.get('mecanicos') or {}).get('nome', '---'),
-            s.get('status'),
-            s.get('prioridade'),
-            s.get('data_inicio'),
-            s.get('data_fim')
+            s.get('status'), s.get('prioridade'),
+            s.get('data_inicio'), s.get('data_fim')
         ])
     wb.save(output)
     return output.getvalue()
 
 # --- 5. CABEÇALHO ---
-st.title("🔧 Gestão de Manutenção v13.0")
+st.title("🔧 Gestão de Manutenção v14.0")
 
 # --- 6. BARRA LATERAL ---
 with st.sidebar:
@@ -94,33 +88,23 @@ with st.sidebar:
 
     st.divider()
     st.header("📊 Filtros e Ordem")
-    ordem_selecionada = st.selectbox("Ordenar fila por:", ["ID", "Prioridade", "Data Solicitação"])
+    ordem_sel = st.selectbox("Ordenar fila por:", ["ID", "Prioridade", "Data Solicitação"])
 
-# Recarrega solicitações com base na ordem escolhida
-solicitacoes = carregar_solicitacoes(ordem_selecionada)
+solicitacoes = carregar_solicitacoes(ordem_sel)
 
 if solicitacoes:
     with st.sidebar:
-        st.download_button(
-            label="📥 Baixar Relatório Excel",
-            data=gerar_excel(solicitacoes),
-            file_name=f"relatorio_{date.today()}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button("📥 Baixar Excel", data=gerar_excel(solicitacoes), file_name=f"OS_{date.today()}.xlsx")
 
-# --- 7. ABRIR NOVA ORDEM DE SERVIÇO ---
+# --- 7. ABRIR NOVA OS ---
 with st.expander("📝 ABRIR NOVA ORDEM DE SERVIÇO", expanded=False):
     with st.form("form_nova_os", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
-        with c1:
-            u_os = st.selectbox("Solicitante", [i['nome'] for i in usuarios_raw])
-            m_os = st.selectbox("Máquina", [i['nome'] for i in maquinas_raw])
-        with c2:
-            mec_os = st.selectbox("Mecânico Responsável", ["Não Definido"] + [i['nome'] for i in mecanicos_raw])
-            prio_os = st.select_slider("Prioridade", ["Baixa", "Média", "Alta", "Urgente"])
-        with c3:
-            data_ini_os = st.date_input("Início Previsto", value=date.today())
-        
+        u_os = c1.selectbox("Solicitante", [i['nome'] for i in usuarios_raw])
+        m_os = c1.selectbox("Máquina", [i['nome'] for i in maquinas_raw])
+        mec_os = c2.selectbox("Mecânico", ["Não Definido"] + [i['nome'] for i in mecanicos_raw])
+        prio_os = c2.select_slider("Prioridade", ["Baixa", "Média", "Alta", "Urgente"])
+        data_ini_os = c3.date_input("Início Previsto", value=date.today())
         desc_os = st.text_area("Descrição do problema")
         
         if st.form_submit_button("🔨 Registrar OS"):
@@ -133,7 +117,6 @@ with st.expander("📝 ABRIR NOVA ORDEM DE SERVIÇO", expanded=False):
                 "descricao": desc_os, "prioridade": prio_os, "status": "Pendente",
                 "data_solicitacao": str(date.today()), "data_inicio": str(data_ini_os)
             }).execute()
-            st.success("✅ OS Registrada!")
             st.rerun()
 
 st.divider()
@@ -142,8 +125,8 @@ st.divider()
 st.subheader("📋 Fila de Ordens de Serviço")
 
 if solicitacoes:
-    # Cabeçalho da Tabela (Colunas ajustadas para incluir Data Solicitação)
-    cols = st.columns([0.6, 1.2, 1.5, 1.2, 1.2, 1.2, 1, 1.5])
+    # Cabeçalho customizado
+    cols = st.columns([0.6, 1.2, 1.5, 1.2, 1.2, 1.2, 1, 2])
     titulos = ["ID", "Abertura", "Máquina", "Status", "Início", "Fim", "Prior.", "Ações"]
     for col, tit in zip(cols, titulos):
         col.markdown(f"**{tit}**")
@@ -152,58 +135,69 @@ if solicitacoes:
     for s in solicitacoes:
         cor = "🔴" if s['status'] == "Pendente" else "🟡" if s['status'] == "Em andamento" else "🟢"
         
-        r_id, r_abert, r_maq, r_status, r_ini, r_fim, r_prio, r_acao = st.columns([0.6, 1.2, 1.5, 1.2, 1.2, 1.2, 1, 1.5])
+        r_id, r_ab, r_maq, r_st, r_ini, r_fim, r_prio, r_acao = st.columns([0.6, 1.2, 1.5, 1.2, 1.2, 1.2, 1, 2])
         
         r_id.write(f"#{s['id']}")
-        r_abert.write(s.get('data_solicitacao', '---'))
+        r_ab.write(s.get('data_solicitacao', '---'))
         r_maq.write((s.get('maquinas') or {}).get('nome', 'N/A'))
-        r_status.write(f"{cor} {s['status']}")
+        r_st.write(f"{cor} {s['status']}")
         r_ini.write(s.get('data_inicio') or "---")
         r_fim.write(s.get('data_fim') or "---")
         r_prio.write(s['prioridade'])
 
-        # --- AÇÕES (FINALIZAR E EDITAR) ---
-        c_fin, c_edit = r_acao.columns(2)
+        # Coluna de Botões (Ações)
+        btn_fin, btn_edit, btn_del = r_acao.columns(3)
         
+        # Botão Finalizar Rápido
         if s['status'] != "Finalizado":
-            if c_fin.button("🏁", key=f"fin_{s['id']}", help="Finalizar Agora"):
-                supabase.table('solicitacoes').update({
-                    "status": "Finalizado", "data_fim": str(date.today())
-                }).eq("id", s['id']).execute()
+            if btn_fin.button("🏁", key=f"fin_{s['id']}", help="Finalizar OS"):
+                supabase.table('solicitacoes').update({"status": "Finalizado", "data_fim": str(date.today())}).eq("id", s['id']).execute()
                 st.rerun()
         
-        if c_edit.button("📝", key=f"edit_btn_{s['id']}", help="Editar Datas/Status"):
-            st.session_state[f"editando_{s['id']}"] = True
+        # Botão Editar
+        if btn_edit.button("📝", key=f"edit_btn_{s['id']}", help="Editar Dados"):
+            st.session_state[f"ed_{s['id']}"] = not st.session_state.get(f"ed_{s['id']}", False)
 
-        # --- FORMULÁRIO DE EDIÇÃO (EXPANDE ABAIXO DA LINHA) ---
-        if st.session_state.get(f"editando_{s['id']}", False):
-            with st.form(key=f"form_edit_{s['id']}"):
-                st.write(f"### Ajustar OS #{s['id']}")
-                fe1, fe2, fe3 = st.columns(3)
-                
-                # Tratamento de datas para o input
-                d_ini_atual = datetime.strptime(s['data_inicio'], '%Y-%m-%d').date() if s.get('data_inicio') else date.today()
-                d_fim_atual = datetime.strptime(s['data_fim'], '%Y-%m-%d').date() if s.get('data_fim') else date.today()
-                
-                novo_st = fe1.selectbox("Status", ["Pendente", "Em andamento", "Finalizado"], index=["Pendente", "Em andamento", "Finalizado"].index(s['status']))
-                nova_data_i = fe2.date_input("Nova Data Início", d_ini_atual)
-                nova_data_f = fe3.date_input("Nova Data Fim", d_fim_atual)
-                
-                btn_salvar, btn_cancelar = st.columns(2)
-                if btn_salvar.form_submit_button("Salvar Alterações"):
-                    supabase.table('solicitacoes').update({
-                        "status": novo_st,
-                        "data_inicio": str(nova_data_i),
-                        "data_fim": str(nova_data_f)
-                    }).eq("id", s['id']).execute()
-                    st.session_state[f"editando_{s['id']}"] = False
-                    st.rerun()
-                
-                if btn_cancelar.form_submit_button("Cancelar"):
-                    st.session_state[f"editando_{s['id']}"] = False
-                    st.rerun()
+        # Botão Excluir Funcional
+        if btn_del.button("🗑️", key=f"del_{s['id']}", help="Excluir Solicitação"):
+            try:
+                supabase.table('solicitacoes').delete().eq("id", s['id']).execute()
+                st.success(f"OS #{s['id']} excluída!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao excluir: {e}")
 
-        st.write('<style>div[data-testid="stHorizontalBlock"]{align-items: center;}</style>', unsafe_allow_html=True)
+        # Seção de Edição (Condicional)
+        if st.session_state.get(f"ed_{s['id']}", False):
+            with st.container():
+                st.info(f"Editando OS #{s['id']}")
+                with st.form(key=f"form_ed_{s['id']}"):
+                    e1, e2, e3 = st.columns(3)
+                    
+                    # Datas seguras
+                    def converter_data(d_str):
+                        try: return datetime.strptime(d_str, '%Y-%m-%d').date()
+                        except: return date.today()
+
+                    st_opcoes = ["Pendente", "Em andamento", "Finalizado"]
+                    novo_st = e1.selectbox("Alterar Status", st_opcoes, index=st_opcoes.index(s['status']) if s['status'] in st_opcoes else 0)
+                    nova_i = e2.date_input("Nova Data Início", converter_data(s.get('data_inicio')))
+                    nova_f = e3.date_input("Nova Data Fim", converter_data(s.get('data_fim')))
+                    
+                    c_salvar, c_cancelar = st.columns(2)
+                    if c_salvar.form_submit_button("✅ Salvar Alterações"):
+                        supabase.table('solicitacoes').update({
+                            "status": novo_st,
+                            "data_inicio": str(nova_i),
+                            "data_fim": str(nova_f)
+                        }).eq("id", s['id']).execute()
+                        st.session_state[f"ed_{s['id']}"] = False
+                        st.rerun()
+                    
+                    if c_cancelar.form_submit_button("❌ Cancelar"):
+                        st.session_state[f"ed_{s['id']}"] = False
+                        st.rerun()
+        
         st.divider()
 else:
     st.info("Nenhuma ordem de serviço encontrada.")
