@@ -192,7 +192,7 @@ if solicitacoes:
     for s in solicitacoes:
         r = st.columns([0.5, 1, 1.2, 1, 1, 1, 0.8, 2.5])
         r[0].write(f"#{s['id']}")
-        r[1].write(s['data_solicitacao'])F
+        r[1].write(s['data_solicitacao'])
         r[2].write(s['maquinas']['nome'] if s['maquinas'] else "Excluída")
         cor = "🔴" if s['status'] == "Pendente" else "🟡" if s['status'] == "Em andamento" else "🟢"
         r[3].write(f"{cor} {s['status']}")
