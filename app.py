@@ -8,36 +8,55 @@ from supabase import create_client, Client
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gestão de Manutenção", layout="wide", page_icon="🔧")
-
-# --- 2. CONEXÃO SEGURA (CORRIGIDA) ---
+# --- 2. CONEXÃO SEGURA (REESCRITO PARA CORRIGIR O ERRO DO CLOUD) ---
 load_dotenv()
 
-# Tenta buscar do st.secrets (Cloud) ou do os.getenv (Desktop/Local)
-URL = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
-KEY = st.secrets.get("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
+# Pegamos os valores e limpamos espaços invisíveis com .strip()
+url_raw = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
+key_raw = st.secrets.get("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
 
-# Verifica se as credenciais existem antes de tentar criar o cliente
-if not URL or not KEY:
-    st.error("## ❌ Credenciais do Supabase não encontradas!")
-    st.warning("Verifique se as chaves estão configuradas nos **Secrets** do Streamlit Cloud ou no arquivo **.env** local.")
-    st.stop()  # Interrompe a execução para não dar erro de conexão
+if not url_raw or not key_raw:
+    st.error("## ❌ Credenciais não encontradas!")
+    st.stop()
 
-# Inicializa o cliente apenas se tiver as chaves
+URL = url_raw.strip()
+KEY = key_raw.strip()
+
+# Usamos cache para evitar que a conexão caia ou dê erro de DNS
+@st.cache_resource
+def abrir_conexao():
+    return create_client(URL, KEY)
+
 try:
-    supabase: Client = create_client(URL, KEY)
+    supabase: Client = abrir_conexao()
 except Exception as e:
-    st.error(f"Erro ao conectar ao Supabase: {e}")
+    st.error(f"Erro de DNS/Conexão: {e}")
     st.stop()
 
 # --- 3. FUNÇÕES DE DADOS ---
 def carregar_listas():
-    """Carrega as tabelas auxiliares para preencher os selects"""
     try:
-        # Buscamos as listas ordenadas por nome para facilitar a seleção
         u = supabase.table('usuarios').select('id, nome').order('nome').execute()
         m = supabase.table('mecanicos').select('id, nome').order('nome').execute()
         q = supabase.table('maquinas').select('id, nome').order('nome').execute()
         return u.data, m.data, q.data
+    except Exception as e:
+        st.sidebar.error(f"Erro ao carregar cadastros: {e}")
+        return [], [], []
+
+def carregar_solicitacoes(ordem_por):
+    try:
+        col = 'ordem_manual'
+        if ordem_por == "Prioridade": col = 'prioridade'
+        elif ordem_por == "Data Solicitação": col = 'data_solicitacao'
+        
+        s = supabase.table('solicitacoes').select(
+            '*, usuarios(nome), mecanicos(nome), maquinas(nome)'
+        ).order(col, desc=True).execute()
+        return s.data
+    except Exception as e:
+        st.error(f"Erro ao carregar fila: {e}")
+        return []
     except Exception as e:
         st.sidebar.error(f"Erro ao carregar cadastros: {e}")
         return [], [], []
