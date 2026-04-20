@@ -1,121 +1,184 @@
 import streamlit as st
-from datetime import date
-from supabase import create_client
+import pandas as pd
+from datetime import date, datetime
+import os
+import io
+from dotenv import load_dotenv
+from supabase import create_client, Client
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
 
-# ── SUPABASE (SECRETS) ─────────────────────────
-SUPABASE_URL = "sua_chave"
-SUPABASE_KEY = "sua_chave"
+# --- 1. CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Gestão de Manutenção", layout="wide", page_icon="🔧")
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+# --- 2. CONEXÃO SEGURA ---
+load_dotenv()
+# Prioriza Secrets do Streamlit Cloud, depois tenta arquivo local
+URL = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
+KEY = st.secrets.get("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
 
-# ── CONFIG ─────────────────────────────────────
-st.set_page_config(
-    page_title="Plano de Manutenção",
-    page_icon="🔧",
-    layout="wide"
-)
+if not URL or not KEY:
+    st.error("❌ Credenciais do Supabase não encontradas. Verifique seus Secrets.")
+    st.stop()
 
-st.title("🔧 PLANO DE MANUTENÇÃO")
+supabase: Client = create_client(URL, KEY)
 
-# ── FUNÇÕES ────────────────────────────────────
-def carregar():
-    response = supabase.table("solicitacoes").select("*").execute()
-    st.write(response)
-    return response.data
+# --- 3. FUNÇÕES DE CARGA DE DADOS ---
+def carregar_listas():
+    u = supabase.table('usuarios').select('id, nome').execute()
+    m = supabase.table('mecanicos').select('id, nome').execute()
+    q = supabase.table('maquinas').select('id, nome').execute()
+    return u.data, m.data, q.data
 
-def carregar():
-    try:
-        response = supabase.table("solicitacoes").select("*").execute()
-        return response.data
-    except Exception as e:
-        st.error(f"Erro Supabase: {e}")
-        return []
-# ── MÉTRICAS ───────────────────────────────────
-dados = carregar()
+def carregar_solicitacoes():
+    s = supabase.table('solicitacoes').select(
+        '*, usuarios(nome), mecanicos(nome), maquinas(nome)'
+    ).order('id', desc=True).execute()
+    return s.data
 
-col1, col2, col3, col4 = st.columns(4)
+# --- 4. FUNÇÃO PARA GERAR EXCEL ---
+def gerar_excel(dados):
+    output = io.BytesIO()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Relatorio_Manutencao"
+    
+    headers = ["ID", "Solicitante", "Máquina", "Mecânico", "Status", "Prioridade", "Solicitado", "Início", "Fim"]
+    ws.append(headers)
+    
+    for s in dados:
+        ws.append([
+            s.get('id'),
+            (s.get('usuarios') or {}).get('nome', 'N/A'),
+            (s.get('maquinas') or {}).get('nome', 'N/A'),
+            (s.get('mecanicos') or {}).get('nome', '---'),
+            s.get('status'),
+            s.get('prioridade'),
+            s.get('data_solicitacao'),
+            s.get('data_inicio'),
+            s.get('data_fim')
+        ])
+    wb.save(output)
+    return output.getvalue()
 
-col1.metric("Total", len(dados))
-col2.metric("Pendentes", sum(1 for d in dados if d["status"] == "Pendente"))
-col3.metric("Andamento", sum(1 for d in dados if d["status"] == "Em andamento"))
-col4.metric("Finalizadas", sum(1 for d in dados if d["status"] == "Finalizada"))
+# Inicialização de dados
+usuarios_raw, mecanicos_raw, maquinas_raw = carregar_listas()
+solicitacoes = carregar_solicitacoes()
+
+# --- 5. BARRA LATERAL: ADMINISTRAÇÃO ---
+with st.sidebar:
+    st.title("⚙️ Administração")
+    
+    with st.expander("➕ Novos Cadastros"):
+        tipo_cad = st.selectbox("O que cadastrar?", ["usuarios", "mecanicos", "maquinas"])
+        nome_cad = st.text_input("Nome completo")
+        if st.button("Salvar Novo"):
+            if nome_cad:
+                supabase.table(tipo_cad).insert({"nome": nome_cad}).execute()
+                st.success("Cadastrado!")
+                st.rerun()
+
+    with st.expander("🗑️ Excluir Registros"):
+        tipo_del = st.selectbox("Excluir de:", ["usuarios", "mecanicos", "maquinas"], key="del_tipo")
+        lista_opcoes = usuarios_raw if tipo_del == "usuarios" else mecanicos_raw if tipo_del == "mecanicos" else maquinas_raw
+        
+        if lista_opcoes:
+            item_del = st.selectbox("Selecione o registro:", [i['nome'] for i in lista_opcoes])
+            if st.button("🔥 Apagar Permanente", type="primary"):
+                id_del = [i['id'] for i in lista_opcoes if i['nome'] == item_del][0]
+                try:
+                    supabase.table(tipo_del).delete().eq("id", id_del).execute()
+                    st.warning(f"{item_del} removido.")
+                    st.rerun()
+                except:
+                    st.error("Erro: Este registro possui vínculos ativos.")
+
+    if solicitacoes:
+        st.divider()
+        st.download_button("📥 Baixar Relatório Excel", data=gerar_excel(solicitacoes), file_name="relatorio_manutencao.xlsx")
+
+# --- 6. CORPO PRINCIPAL ---
+st.title("🛠️ Plano de Manutenção v11.5")
+
+# FORMULÁRIO DE NOVA OS
+with st.expander("📝 ABRIR NOVA ORDEM DE SERVIÇO", expanded=False):
+    with st.form("form_os", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            u_os = st.selectbox("Solicitante", [i['nome'] for i in usuarios_raw])
+            m_os = st.selectbox("Máquina", [i['nome'] for i in maquinas_raw])
+        with c2:
+            mec_os = st.selectbox("Mecânico Responsável", ["Não Definido"] + [i['nome'] for i in mecanicos_raw])
+            prio_os = st.select_slider("Prioridade", ["Baixa", "Média", "Alta", "Urgente"])
+        
+        desc_os = st.text_area("Descrição técnica do problema")
+        
+        if st.form_submit_button("🔨 Registrar Ordem de Serviço"):
+            u_id = [i['id'] for i in usuarios_raw if i['nome'] == u_os][0]
+            m_id = [i['id'] for i in maquinas_raw if i['nome'] == m_os][0]
+            mec_id = next((i['id'] for i in mecanicos_raw if i['nome'] == mec_os), None)
+                
+            supabase.table('solicitacoes').insert({
+                "usuario_id": u_id, "maquina_id": m_id, "mecanico_id": mec_id,
+                "descricao": desc_os, "prioridade": prio_os, "status": "Pendente",
+                "data_solicitacao": str(date.today())
+            }).execute()
+            st.success("✅ OS Registrada!")
+            st.rerun()
 
 st.divider()
 
-# ── FORMULÁRIO ─────────────────────────────────
-st.subheader("📋 Nova Solicitação")
+# --- 7. ATUALIZAR SOLICITAÇÃO (LISTA SUSPENSA/EXPANDER) ---
+st.subheader("🚀 Gerenciamento de OS")
 
-c1, c2, c3 = st.columns(3)
+if solicitacoes:
+    with st.expander("📑 Clique aqui para Editar ou Finalizar uma OS", expanded=False):
+        opcoes_update = {f"ID: {s['id']} | {s.get('maquinas',{}).get('nome', 'N/A')}" : s for s in solicitacoes}
+        escolha = st.selectbox("Selecione a Ordem de Serviço:", list(opcoes_update.keys()))
+        
+        if escolha:
+            dados_atuais = opcoes_update[escolha]
+            with st.form(f"edit_form_{dados_atuais['id']}"):
+                at1, at2, at3 = st.columns(3)
+                
+                with at1:
+                    idx_status = ["Pendente", "Em andamento", "Finalizado"].index(dados_atuais['status'])
+                    novo_status = st.selectbox("Alterar Status", ["Pendente", "Em andamento", "Finalizado"], index=idx_status)
+                
+                with at2:
+                    d_ini_val = datetime.strptime(dados_atuais['data_inicio'], '%Y-%m-%d').date() if dados_atuais.get('data_inicio') else date.today()
+                    nova_data_i = st.date_input("Data de Início", value=d_ini_val)
+                
+                with at3:
+                    d_fim_val = datetime.strptime(dados_atuais['data_fim'], '%Y-%m-%d').date() if dados_atuais.get('data_fim') else date.today()
+                    nova_data_f = st.date_input("Data de Finalização", value=d_fim_val)
+                
+                if st.form_submit_button("✅ Salvar Alterações Detalhadas"):
+                    supabase.table('solicitacoes').update({
+                        "status": novo_status,
+                        "data_inicio": str(nova_data_i),
+                        "data_fim": str(nova_data_f)
+                    }).eq("id", dados_atuais['id']).execute()
+                    
+                    st.success(f"OS {dados_atuais['id']} atualizada!")
+                    st.rerun()
 
-with c1:
-    solicitador = st.text_input("Solicitador")
-    maquina = st.text_input("Máquina")
+st.divider()
 
-with c2:
-    prioridade = st.selectbox("Prioridade", ["Urgente", "Alta", "Média", "Baixa"])
-
-with c3:
-    descricao = st.text_area("Descrição")
-
-if st.button("🚀 Registrar"):
-    if maquina and descricao:
-        inserir({
-            "solicitador": solicitador,
-            "maquina": maquina,
-            "descricao": descricao,
-            "data_solicitacao": date.today(),
-            "data_inicio": None,
-            "data_fim": None,
-            "status": "Pendente",
-            "prioridade": prioridade
+# --- 8. FILA DE ORDENS (VISUALIZAÇÃO) ---
+st.subheader("📋 Fila de Ordens de Serviço")
+if solicitacoes:
+    df_lista = []
+    for s in solicitacoes:
+        df_lista.append({
+            "ID": s['id'],
+            "Máquina": (s.get('maquinas') or {}).get('nome', 'N/A'),
+            "Mecânico": (s.get('mecanicos') or {}).get('nome', '---'),
+            "Status": s.get('status'),
+            "Início": s.get('data_inicio'),
+            "Final": s.get('data_fim'),
+            "Prioridade": s.get('prioridade')
         })
-        st.success("✅ Salvo com sucesso!")
-        st.rerun()
-    else:
-        st.error("Preencha os campos obrigatórios")
-
-st.divider()
-
-# ── LISTA ──────────────────────────────────────
-st.subheader("📊 Fila de Manutenção")
-
-dados = carregar()
-
-if not dados:
-    st.info("Nenhuma solicitação cadastrada.")
+    st.dataframe(pd.DataFrame(df_lista), use_container_width=True, hide_index=True)
 else:
-    for item in dados:
-        with st.container():
-            st.markdown(f"### {item['descricao']}")
-
-            st.write(f"👤 {item['solicitador']} | ⚙️ {item['maquina']}")
-            st.write(f"🔥 {item['prioridade']} | 📌 {item['status']}")
-
-            st.write(f"📅 Solicitação: {item['data_solicitacao']}")
-            st.write(f"🟦 Início: {item['data_inicio'] or '-'}")
-            st.write(f"🟥 Fim: {item['data_fim'] or '-'}")
-
-            colA, colB, colC = st.columns(3)
-
-            with colA:
-                if st.button("▶️ Iniciar", key=f"iniciar_{item['id']}"):
-                    atualizar(item["id"], {
-                        "status": "Em andamento",
-                        "data_inicio": date.today()
-                    })
-                    st.rerun()
-
-            with colB:
-                if st.button("✅ Finalizar", key=f"final_{item['id']}"):
-                    atualizar(item["id"], {
-                        "status": "Finalizada",
-                        "data_fim": date.today()
-                    })
-                    st.rerun()
-
-            with colC:
-                if st.button("🗑️ Excluir", key=f"del_{item['id']}"):
-                    deletar(item["id"])
-                    st.rerun()
-
-            st.divider()
+    st.info("Nenhuma ordem de serviço encontrada.")
