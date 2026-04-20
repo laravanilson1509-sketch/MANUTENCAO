@@ -8,7 +8,7 @@ from supabase import create_client, Client
 from openpyxl import Workbook
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Gestão de Manutenção", layout="wide", page_icon="🔧")
+st.set_page_config(page_title="Gestão Manutenção", layout="wide", page_icon="🔧")
 
 # --- 2. CONEXÃO SEGURA ---
 load_dotenv()
@@ -16,87 +16,51 @@ URL = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
 KEY = st.secrets.get("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
 
 if not URL or not KEY:
-    st.error("❌ Credenciais do Supabase não encontradas.")
+    st.error("❌ Credenciais do Supabase não encontradas. Verifique seu arquivo .env ou Secrets.")
     st.stop()
 
 supabase: Client = create_client(URL, KEY)
 
 # --- 3. CARGA DE DADOS ---
 def carregar_listas():
-    try:
-        u = supabase.table('usuarios').select('id, nome').execute()
-        m = supabase.table('mecanicos').select('id, nome').execute()
-        q = supabase.table('maquinas').select('id, nome').execute()
-        return u.data, m.data, q.data
-    except Exception as e:
-        st.error(f"Erro ao carregar listas: {e}")
-        return [], [], []
+    u = supabase.table('usuarios').select('id, nome').execute()
+    m = supabase.table('mecanicos').select('id, nome').execute()
+    q = supabase.table('maquinas').select('id, nome').execute()
+    return u.data, m.data, q.data
 
 def carregar_solicitacoes(ordem_por="ID"):
-    try:
-        coluna_sort = 'id'
-        if ordem_por == "Prioridade":
-            coluna_sort = 'prioridade'
-        elif ordem_por == "Data Solicitação":
-            coluna_sort = 'data_solicitacao'
-
-        s = supabase.table('solicitacoes').select(
-            '*, usuarios(nome), mecanicos(nome), maquinas(nome)'
-        ).order(coluna_sort, desc=True).execute()
-        return s.data
-    except Exception as e:
-        st.error(f"Erro ao carregar solicitações: {e}")
-        return []
+    col_sort = 'id'
+    if ordem_por == "Prioridade": col_sort = 'prioridade'
+    elif ordem_por == "Data Solicitação": col_sort = 'data_solicitacao'
+    
+    s = supabase.table('solicitacoes').select(
+        '*, usuarios(nome), mecanicos(nome), maquinas(nome)'
+    ).order(col_sort, desc=True).execute()
+    return s.data
 
 # Inicialização de dados
 usuarios_raw, mecanicos_raw, maquinas_raw = carregar_listas()
 
-# --- 4. FUNÇÃO PARA GERAR EXCEL ---
-def gerar_excel(dados):
-    output = io.BytesIO()
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Relatorio"
-    headers = ["ID", "Abertura", "Solicitante", "Máquina", "Mecânico", "Status", "Prioridade", "Início", "Fim"]
-    ws.append(headers)
-    for s in dados:
-        ws.append([
-            s.get('id'), s.get('data_solicitacao'),
-            (s.get('usuarios') or {}).get('nome', 'N/A'),
-            (s.get('maquinas') or {}).get('nome', 'N/A'),
-            (s.get('mecanicos') or {}).get('nome', '---'),
-            s.get('status'), s.get('prioridade'),
-            s.get('data_inicio'), s.get('data_fim')
-        ])
-    wb.save(output)
-    return output.getvalue()
-
-# --- 5. CABEÇALHO ---
-st.title("🔧 Gestão de Manutenção v14.0")
-
-# --- 6. BARRA LATERAL ---
+# --- 4. BARRA LATERAL (CADASTROS E FILTROS) ---
 with st.sidebar:
-    st.header("⚙️ Administração")
+    st.header("⚙️ Configurações")
+    ordem_sel = st.selectbox("Ordenar por:", ["ID", "Prioridade", "Data Solicitação"])
+    
     with st.expander("➕ Novos Cadastros"):
-        tipo_cad = st.selectbox("Tipo", ["usuarios", "mecanicos", "maquinas"])
-        nome_cad = st.text_input("Nome do Registro")
+        tipo = st.selectbox("Tipo", ["usuarios", "mecanicos", "maquinas"])
+        nome = st.text_input("Nome")
         if st.button("Salvar Cadastro"):
-            if nome_cad:
-                supabase.table(tipo_cad).insert({"nome": nome_cad}).execute()
-                st.success("Cadastrado!")
+            if nome:
+                supabase.table(tipo).insert({"nome": nome}).execute()
                 st.rerun()
 
-    st.divider()
-    st.header("📊 Filtros e Ordem")
-    ordem_sel = st.selectbox("Ordenar fila por:", ["ID", "Prioridade", "Data Solicitação"])
-
+# Atualiza a lista com base na ordem escolhida
 solicitacoes = carregar_solicitacoes(ordem_sel)
 
-if solicitacoes:
-    with st.sidebar:
-        st.download_button("📥 Baixar Excel", data=gerar_excel(solicitacoes), file_name=f"OS_{date.today()}.xlsx")
+# --- 5. CABEÇALHO ---
+st.title("🔧 Gestão de Manutenção v15.0")
 
-# --- 7. ABRIR NOVA OS ---
+# --- 6. ABRIR NOVA ORDEM DE SERVIÇO ---
 with st.expander("📝 ABRIR NOVA ORDEM DE SERVIÇO", expanded=False):
     with st.form("form_nova_os", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
@@ -104,7 +68,8 @@ with st.expander("📝 ABRIR NOVA ORDEM DE SERVIÇO", expanded=False):
         m_os = c1.selectbox("Máquina", [i['nome'] for i in maquinas_raw])
         mec_os = c2.selectbox("Mecânico", ["Não Definido"] + [i['nome'] for i in mecanicos_raw])
         prio_os = c2.select_slider("Prioridade", ["Baixa", "Média", "Alta", "Urgente"])
-        data_ini_os = c3.date_input("Início Previsto", value=date.today())
+        data_ini_os = c3.date_input("Início Programado", value=date.today())
+        
         desc_os = st.text_area("Descrição do problema")
         
         if st.form_submit_button("🔨 Registrar OS"):
@@ -121,11 +86,11 @@ with st.expander("📝 ABRIR NOVA ORDEM DE SERVIÇO", expanded=False):
 
 st.divider()
 
-# --- 8. FILA DE ORDENS ---
+# --- 7. FILA DE ORDENS ---
 st.subheader("📋 Fila de Ordens de Serviço")
 
 if solicitacoes:
-    # Cabeçalho customizado
+    # Cabeçalho da Tabela
     cols = st.columns([0.6, 1.2, 1.5, 1.2, 1.2, 1.2, 1, 2])
     titulos = ["ID", "Abertura", "Máquina", "Status", "Início", "Fim", "Prior.", "Ações"]
     for col, tit in zip(cols, titulos):
@@ -133,71 +98,68 @@ if solicitacoes:
     st.divider()
 
     for s in solicitacoes:
+        r_id, r_ab, r_ma, r_st, r_in, r_fi, r_pr, r_ac = st.columns([0.6, 1.2, 1.5, 1.2, 1.2, 1.2, 1, 2])
+        
+        # Estilização de Status
         cor = "🔴" if s['status'] == "Pendente" else "🟡" if s['status'] == "Em andamento" else "🟢"
         
-        r_id, r_ab, r_maq, r_st, r_ini, r_fim, r_prio, r_acao = st.columns([0.6, 1.2, 1.5, 1.2, 1.2, 1.2, 1, 2])
-        
         r_id.write(f"#{s['id']}")
-        r_ab.write(s.get('data_solicitacao', '---'))
-        r_maq.write((s.get('maquinas') or {}).get('nome', 'N/A'))
+        r_ab.write(s.get('data_solicitacao') or "---")
+        r_ma.write((s.get('maquinas') or {}).get('nome', 'N/A'))
         r_st.write(f"{cor} {s['status']}")
-        r_ini.write(s.get('data_inicio') or "---")
-        r_fim.write(s.get('data_fim') or "---")
-        r_prio.write(s['prioridade'])
+        r_in.write(s.get('data_inicio') or "---")
+        r_fi.write(s.get('data_fim') or "---")
+        r_pr.write(s['prioridade'])
 
-        # Coluna de Botões (Ações)
-        btn_fin, btn_edit, btn_del = r_acao.columns(3)
+        # Coluna de Ações
+        b_fin, b_edit, b_del = r_ac.columns(3)
         
         # Botão Finalizar Rápido
         if s['status'] != "Finalizado":
-            if btn_fin.button("🏁", key=f"fin_{s['id']}", help="Finalizar OS"):
+            if b_fin.button("🏁", key=f"f_{s['id']}", help="Finalizar OS"):
                 supabase.table('solicitacoes').update({"status": "Finalizado", "data_fim": str(date.today())}).eq("id", s['id']).execute()
                 st.rerun()
         
         # Botão Editar
-        if btn_edit.button("📝", key=f"edit_btn_{s['id']}", help="Editar Dados"):
-            st.session_state[f"ed_{s['id']}"] = not st.session_state.get(f"ed_{s['id']}", False)
+        if b_edit.button("📝", key=f"e_{s['id']}", help="Editar Datas/Status"):
+            st.session_state[f"editando_{s['id']}"] = not st.session_state.get(f"editando_{s['id']}", False)
 
         # Botão Excluir Funcional
-        if btn_del.button("🗑️", key=f"del_{s['id']}", help="Excluir Solicitação"):
-            try:
-                supabase.table('solicitacoes').delete().eq("id", s['id']).execute()
-                st.success(f"OS #{s['id']} excluída!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Erro ao excluir: {e}")
+        if b_del.button("🗑️", key=f"d_{s['id']}", help="Excluir OS permanentemente"):
+            supabase.table('solicitacoes').delete().eq("id", s['id']).execute()
+            st.rerun()
 
-        # Seção de Edição (Condicional)
-        if st.session_state.get(f"ed_{s['id']}", False):
-            with st.container():
-                st.info(f"Editando OS #{s['id']}")
-                with st.form(key=f"form_ed_{s['id']}"):
-                    e1, e2, e3 = st.columns(3)
-                    
-                    # Datas seguras
-                    def converter_data(d_str):
-                        try: return datetime.strptime(d_str, '%Y-%m-%d').date()
-                        except: return date.today()
+        # Formulário de Edição (Abre abaixo da linha)
+        if st.session_state.get(f"editando_{s['id']}", False):
+            with st.form(key=f"form_ed_{s['id']}"):
+                st.info(f"Ajustando OS #{s['id']}")
+                fe1, fe2, fe3 = st.columns(3)
+                
+                # Funções de ajuda para datas
+                def conv_dt(d_str):
+                    try: return datetime.strptime(d_str, '%Y-%m-%d').date()
+                    except: return date.today()
 
-                    st_opcoes = ["Pendente", "Em andamento", "Finalizado"]
-                    novo_st = e1.selectbox("Alterar Status", st_opcoes, index=st_opcoes.index(s['status']) if s['status'] in st_opcoes else 0)
-                    nova_i = e2.date_input("Nova Data Início", converter_data(s.get('data_inicio')))
-                    nova_f = e3.date_input("Nova Data Fim", converter_data(s.get('data_fim')))
-                    
-                    c_salvar, c_cancelar = st.columns(2)
-                    if c_salvar.form_submit_button("✅ Salvar Alterações"):
-                        supabase.table('solicitacoes').update({
-                            "status": novo_st,
-                            "data_inicio": str(nova_i),
-                            "data_fim": str(nova_f)
-                        }).eq("id", s['id']).execute()
-                        st.session_state[f"ed_{s['id']}"] = False
-                        st.rerun()
-                    
-                    if c_cancelar.form_submit_button("❌ Cancelar"):
-                        st.session_state[f"ed_{s['id']}"] = False
-                        st.rerun()
+                opcoes_status = ["Pendente", "Em andamento", "Finalizado"]
+                idx_st = opcoes_status.index(s['status']) if s['status'] in opcoes_status else 0
+                
+                novo_st = fe1.selectbox("Status", opcoes_status, index=idx_st)
+                nova_i = fe2.date_input("Data Início", conv_dt(s.get('data_inicio')))
+                nova_f = fe3.date_input("Data Fim", conv_dt(s.get('data_fim')))
+                
+                c_ok, c_cancel = st.columns(2)
+                if c_ok.form_submit_button("✅ Salvar"):
+                    supabase.table('solicitacoes').update({
+                        "status": novo_st,
+                        "data_inicio": str(nova_i),
+                        "data_fim": str(nova_f)
+                    }).eq("id", s['id']).execute()
+                    st.session_state[f"editando_{s['id']}"] = False
+                    st.rerun()
+                if c_cancel.form_submit_button("❌ Cancelar"):
+                    st.session_state[f"editando_{s['id']}"] = False
+                    st.rerun()
         
         st.divider()
 else:
-    st.info("Nenhuma ordem de serviço encontrada.")
+    st.info("Nenhuma ordem de serviço pendente.")
