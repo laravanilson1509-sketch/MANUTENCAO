@@ -8,31 +8,38 @@ from supabase import create_client, Client
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gestão de Manutenção", layout="wide", page_icon="🔧")
 
-# --- 2. CONEXÃO SEGURA (PADRONIZADA CLOUD/DESKTOP) ---
-# O st.secrets funciona no Cloud (pelo painel) e no Desktop (pelo arquivo .streamlit/secrets.toml)
-URL_RAW = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
-KEY_RAW = st.secrets.get("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
-
-if not URL_RAW or not KEY_RAW:
-    st.error("## ❌ Credenciais não encontradas!")
-    st.info("No Desktop: Verifique o arquivo .streamlit/secrets.toml. No Cloud: Verifique a aba Secrets.")
-    st.stop()
-
-# Limpeza para evitar o erro "Name or service not known"
-URL = URL_RAW.strip().replace(" ", "")
-KEY = KEY_RAW.strip().replace(" ", "")
-
-@st.cache_resource
-def conectar():
-    return create_client(URL, KEY)
-
+# --- 2. CONEXÃO SEGURA (TESTE DE DIAGNÓSTICO) ---
+# Se o erro persistir, o erro mostrará a URL que ele está recebendo
 try:
-    supabase = conectar()
-except Exception as e:
-    st.error(f"Erro ao conectar ao banco: {e}")
-    st.stop()
+    url_secrets = st.secrets.get("SUPABASE_URL")
+    key_secrets = st.secrets.get("SUPABASE_ANON_KEY")
+    
+    if not url_secrets or not key_secrets:
+        st.error("❌ Credenciais não encontradas nos Secrets do Cloud.")
+        st.stop()
 
-# --- 3. FUNÇÕES DE DADOS ---
+    # Limpeza total de espaços e quebras de linha
+    URL = url_secrets.strip().replace(" ", "").replace("\n", "").replace("\r", "")
+    KEY = key_secrets.strip().replace(" ", "").replace("\n", "").replace("\r", "")
+
+    # Remove barra final se existir
+    if URL.endswith("/"): URL = URL[:-1]
+
+    @st.cache_resource
+    def conectar():
+        return create_client(URL, KEY)
+
+    supabase = conectar()
+    
+    # Teste de fogo: se falhar aqui, o erro é a URL
+    supabase.table('maquinas').select("id").limit(1).execute()
+
+except Exception as e:
+    st.error(f"### 🚨 Erro de Conexão")
+    st.write(f"Tentando acessar: `{URL}`") # Isso nos mostrará se a URL está certa
+    st.error(f"Detalhe técnico: {e}")
+    st.info("💡 Dica: Verifique se o projeto no Supabase não está PAUSADO.")
+    st.stop()
 
 # --- 3. FUNÇÕES DE DADOS ---
 def carregar_listas():
