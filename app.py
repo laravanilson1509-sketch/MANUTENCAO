@@ -2,50 +2,33 @@ import streamlit as st
 import pandas as pd
 from datetime import date, datetime
 import os
+from io import BytesIO
 from supabase import create_client, Client
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gestão de Manutenção", layout="wide", page_icon="🔧")
 
-# CSS Avançado: 
-# 1. Detecta se o celular está em pé e sugere girar.
-# 2. Garante que a tabela tenha um tamanho mínimo para não achatar as datas.
+# CSS para evitar quebras de linha e melhorar visualização mobile
 st.markdown("""
     <style>
-    /* Aviso para girar a tela (visível apenas em telas pequenas em modo retrato) */
-    @media only screen and (max-width: 600px) and (orientation: portrait) {
-        body::before {
-            content: "🔄 Gire o celular para modo Paisagem (Deitado) para uma melhor visualização da tabela.";
-            display: block;
-            background-color: #ff4b4b;
-            color: white;
-            text-align: center;
-            padding: 10px;
-            font-weight: bold;
-            position: sticky;
-            top: 0;
-            z-index: 9999;
-        }
-    }
-
-    /* Impede que as colunas da tabela fiquem menores que 100px */
     [data-testid="column"] {
-        min-width: 100px;
+        min-width: 90px; 
+        white-space: nowrap;
     }
-    
-    /* Permite rolagem horizontal suave na página toda se necessário */
     .main .block-container {
+        padding-left: 1rem;
+        padding-right: 1rem;
         overflow-x: auto;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# Função Auxiliar para formatar a data na tabela (Padrão BR)
+# Função para formatar data padrão BR abreviado (Ex: 21/04/26)
 def formatar_data_br(data_str):
     if not data_str or data_str == "---":
         return "---"
     try:
-        return datetime.strptime(data_str, '%Y-%m-%d').strftime('%d/%m/%Y')
+        return datetime.strptime(data_str, '%Y-%m-%d').strftime('%d/%m/%y')
     except:
         return data_str
 
@@ -93,26 +76,85 @@ def carregar_solicitacoes(ordem_por):
     except:
         return []
 
+# --- FUNÇÃO EXCEL AJUSTADA (MAIS ROBUSTA) ---
+def gerar_excel(dados):
+    if not dados or len(dados) == 0: 
+        return None
+    try:
+        df_export = pd.DataFrame(dados)
+        
+        # Extração segura dos nomes (caso o relacionamento venha nulo)
+        df_export['Solicitante'] = df_export['usuarios'].apply(lambda x: x['nome'] if isinstance(x, dict) else '---')
+        df_export['Maquina'] = df_export['maquinas'].apply(lambda x: x['nome'] if isinstance(x, dict) else '---')
+        df_export['Mecanico'] = df_export['mecanicos'].apply(lambda x: x['nome'] if isinstance(x, dict) else '---')
+        
+        colunas_map = {
+            'data_solicitacao': 'Data Abertura', 
+            'Solicitante': 'Solicitante',
+            'Maquina': 'Equipamento', 
+            'Mecanico': 'Mecanico Responsavel', 
+            'status': 'Status',
+            'prioridade': 'Prioridade', 
+            'data_inicio': 'Data Inicio', 
+            'data_fim': 'Data Fim', 
+            'descricao': 'Observacoes'
+        }
+        
+        # Filtra apenas colunas que existem no DF para evitar erro de KeyError
+        colunas_existentes = [c for c in colunas_map.keys() if c in df_export.columns]
+        df_final = df_export[colunas_existentes].rename(columns=colunas_map)
+        
+        output = BytesIO()
+        # Engine explicita xlsxwriter
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df_final.to_excel(writer, index=False, sheet_name='Manutencoes')
+            # Ajuste automático de largura de colunas no Excel
+            worksheet = writer.sheets['Manutencoes']
+            for i, col in enumerate(df_final.columns):
+                column_len = max(df_final[col].astype(str).str.len().max(), len(col)) + 2
+                worksheet.set_column(i, i, column_len)
+        
+        return output.getvalue()
+    except Exception as e:
+        st.sidebar.error(f"Erro ao gerar Excel: {e}")
+        return None
+
 # --- 4. INTERFACE ---
 st.title("🔧 Plano de Manutenção")
 usuarios_raw, mecanicos_raw, maquinas_raw = carregar_listas()
-solicitacoes_metrics = carregar_solicitacoes("Fila Manual")
+solicitacoes_all = carregar_solicitacoes("Fila Manual")
 
 # --- INDICADORES (CARDS) ---
-if solicitacoes_metrics:
-    df_m = pd.DataFrame(solicitacoes_metrics)
+if solicitacoes_all:
+    df_m = pd.DataFrame(solicitacoes_all)
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Pendentes", len(df_m[df_m['status'] == 'Pendente']))
     c2.metric("Em andamento", len(df_m[df_m['status'] == 'Em andamento']))
     c3.metric("Finalizados", len(df_m[df_m['status'] == 'Finalizado']))
     c4.metric("Urgentes", len(df_m[df_m['prioridade'] == 'Urgente']))
 
-# --- BARRA LATERAL ---
+# --- BARRA LATERAL (CADASTROS RESTAURADOS) ---
 with st.sidebar:
     st.header("⚙️ Configurações")
     if st.button("🔄 Atualizar Página"): st.rerun()
     ordem_sel = st.selectbox("Ordenar por:", ["Fila Manual", "Prioridade", "Data Solicitação"])
     
+    st.divider()
+    st.subheader("📊 Relatórios")
+    
+    # Geração do arquivo Excel
+    excel_data = gerar_excel(solicitacoes_all)
+    if excel_data:
+        st.download_button(
+            label="📥 Baixar Relatório Excel",
+            data=excel_data,
+            file_name=f"relatorio_manutencao_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    else:
+        st.info("Sem dados para exportar.")
+
     st.divider()
     st.header("➕ Gerenciar Cadastros")
     
@@ -120,9 +162,7 @@ with st.sidebar:
         with st.form("cad_u", clear_on_submit=True):
             n_u = st.text_input("Novo Usuário")
             if st.form_submit_button("Adicionar"):
-                if n_u: 
-                    supabase.table('usuarios').insert({"nome": n_u}).execute()
-                    st.rerun()
+                if n_u: supabase.table('usuarios').insert({"nome": n_u}).execute(); st.rerun()
         for u in usuarios_raw:
             c1, c2 = st.columns([3, 1])
             c1.write(u['nome'])
@@ -133,9 +173,7 @@ with st.sidebar:
         with st.form("cad_q", clear_on_submit=True):
             n_q = st.text_input("Nova Máquina")
             if st.form_submit_button("Adicionar"):
-                if n_q:
-                    supabase.table('maquinas').insert({"nome": n_q}).execute()
-                    st.rerun()
+                if n_q: supabase.table('maquinas').insert({"nome": n_q}).execute(); st.rerun()
         for q in maquinas_raw:
             c1, c2 = st.columns([3, 1])
             c1.write(q['nome'])
@@ -146,9 +184,7 @@ with st.sidebar:
         with st.form("cad_m", clear_on_submit=True):
             n_m = st.text_input("Novo Mecânico")
             if st.form_submit_button("Adicionar"):
-                if n_m:
-                    supabase.table('mecanicos').insert({"nome": n_m}).execute()
-                    st.rerun()
+                if n_m: supabase.table('mecanicos').insert({"nome": n_m}).execute(); st.rerun()
         for m in mecanicos_raw:
             c1, c2 = st.columns([3, 1])
             c1.write(m['nome'])
@@ -157,66 +193,51 @@ with st.sidebar:
 
 # --- 5. NOVA ORDEM DE SERVIÇO ---
 solicitacoes = carregar_solicitacoes(ordem_sel)
-
 with st.expander("📝 NOVA ORDEM DE SERVIÇO"):
     with st.form("f_nova", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         u_sel = c1.selectbox("Solicitante", [i['nome'] for i in usuarios_raw])
         m_sel = c2.selectbox("Máquina", [i['nome'] for i in maquinas_raw])
         prio_sel = c3.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Urgente"])
-        
         c4, c5 = st.columns(2)
         mec_sel = c4.selectbox("Mecânico Responsável", ["Nenhum"] + [i['nome'] for i in mecanicos_raw])
         dt_i = c5.date_input("Data de Início", date.today())
-        
         desc = st.text_area("Observação / Descrição do Problema")
-        
         if st.form_submit_button("🔨 Abrir Ordem de Serviço", use_container_width=True):
             u_id = next(i['id'] for i in usuarios_raw if i['nome'] == u_sel)
             m_id = next(i['id'] for i in maquinas_raw if i['nome'] == m_sel)
             mec_id = next((i['id'] for i in mecanicos_raw if i['nome'] == mec_sel), None)
-            
             supabase.table('solicitacoes').insert({
                 "usuario_id": u_id, "maquina_id": m_id, "mecanico_id": mec_id, "descricao": desc,
                 "prioridade": prio_sel, "status": "Pendente", "data_solicitacao": date.today().isoformat(),
                 "data_inicio": dt_i.isoformat(), "ordem_manual": int(datetime.now().timestamp())
-            }).execute()
-            st.rerun()
+            }).execute(); st.rerun()
 
 # --- 6. TABELA DE FILA ---
 if solicitacoes:
     st.divider()
-    cols = st.columns([0.9, 1.2, 1.0, 1.1, 1.0, 1.0, 1.0, 1.6, 2.0])
+    cols = st.columns([0.8, 1.2, 1.0, 1.0, 0.9, 0.8, 0.8, 1.6, 1.8])
     labels = ["Abertura", "Máquina", "Mecânico", "Status", "Prioridade", "Início", "Fim", "Obs", "Ações"]
-    for col, t in zip(cols, labels):
-        col.markdown(f"**{t}**")
+    for col, t in zip(cols, labels): col.markdown(f"**{t}**")
     
     for s in solicitacoes:
-        r = st.columns([0.9, 1.2, 1.0, 1.1, 1.0, 1.0, 1.0, 1.6, 2.0])
-        
+        r = st.columns([0.8, 1.2, 1.0, 1.0, 0.9, 0.8, 0.8, 1.6, 1.8])
         r[0].write(formatar_data_br(s['data_solicitacao']))
         r[1].write(f"**{s['maquinas']['nome'] if s['maquinas'] else '---'}**")
         r[2].write(s['mecanicos']['nome'] if s['mecanicos'] else "---")
-        
         status_map = {"Pendente": "🟦 Pendente", "Em andamento": "🟧 Em andamento", "Finalizado": "🟩 Finalizado"}
         r[3].write(status_map.get(s['status'], s['status']))
-        
         p = s['prioridade']
         cor_p = "🟢 Baixa" if p == "Baixa" else "🟡 Média" if p == "Média" else "🟠 Alta" if p == "Alta" else "🔴 Urgente"
         r[4].write(cor_p)
-        
         r[5].write(formatar_data_br(s['data_inicio']))
         r[6].write(formatar_data_br(s.get('data_fim', '---')))
         r[7].caption(s['descricao'] if s['descricao'] else "---")
         
         btns = r[8].columns(5)
         if s['status'] != "Finalizado" and btns[0].button("🏁", key=f"f_{s['id']}"):
-            supabase.table('solicitacoes').update({"status": "Finalizado", "data_fim": date.today().isoformat()}).eq("id", s['id']).execute()
-            st.rerun()
-
-        if btns[1].button("📝", key=f"e_{s['id']}"): 
-            st.session_state[f"ed_{s['id']}"] = True
-        
+            supabase.table('solicitacoes').update({"status": "Finalizado", "data_fim": date.today().isoformat()}).eq("id", s['id']).execute(); st.rerun()
+        if btns[1].button("📝", key=f"e_{s['id']}"): st.session_state[f"ed_{s['id']}"] = True
         curr_o = s.get('ordem_manual', 0)
         if btns[2].button("🔼", key=f"u_{s['id']}"):
             supabase.table('solicitacoes').update({"ordem_manual": curr_o + 100}).eq("id", s['id']).execute(); st.rerun()
@@ -231,35 +252,22 @@ if solicitacoes:
                 with st.form(key=f"form_ed_{s['id']}"):
                     st.write(f"### Editar OS")
                     e1, e2, e3 = st.columns(3)
-                    
                     new_status = e1.selectbox("Status", ["Pendente", "Em andamento", "Finalizado"], index=["Pendente", "Em andamento", "Finalizado"].index(s['status']))
                     new_prio = e2.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Urgente"], index=["Baixa", "Média", "Alta", "Urgente"].index(s['prioridade']))
-                    
                     lista_mecs = [i['nome'] for i in mecanicos_raw]
                     idx_mec = lista_mecs.index(s['mecanicos']['nome']) if s['mecanicos'] and s['mecanicos']['nome'] in lista_mecs else 0
                     new_mec = e3.selectbox("Responsável", lista_mecs, index=idx_mec)
-
                     d1, d2 = st.columns(2)
                     try: val_ini = datetime.strptime(s['data_inicio'], '%Y-%m-%d').date() if s['data_inicio'] else date.today()
                     except: val_ini = date.today()
                     try: val_fim = datetime.strptime(s['data_fim'], '%Y-%m-%d').date() if s['data_fim'] else date.today()
                     except: val_fim = date.today()
-
-                    new_dt_inicio = d1.date_input("Data Início", val_ini, key=f"dtin_{s['id']}")
-                    new_dt_fim = d2.date_input("Data Fim", val_fim, key=f"dtfim_{s['id']}")
-                    new_desc = st.text_area("Editar Observação", value=s['descricao'])
-                    
-                    if st.form_submit_button("✅ Salvar Alterações"):
+                    new_dt_inicio = d1.date_input("Início", val_ini, key=f"dtin_{s['id']}")
+                    new_dt_fim = d2.date_input("Fim", val_fim, key=f"dtfim_{s['id']}")
+                    new_desc = st.text_area("Observação", value=s['descricao'])
+                    if st.form_submit_button("✅ Salvar"):
                         m_id_edit = next(i['id'] for i in mecanicos_raw if i['nome'] == new_mec)
-                        payload = {
-                            "status": new_status, "prioridade": new_prio, "mecanico_id": m_id_edit,
-                            "descricao": new_desc, "data_inicio": new_dt_inicio.isoformat(),
-                            "data_fim": new_dt_fim.isoformat() if new_status == "Finalizado" else None
-                        }
-                        supabase.table('solicitacoes').update(payload).eq("id", s['id']).execute()
-                        st.session_state[f"ed_{s['id']}"] = False
-                        st.rerun()
-                if st.button("❌ Cancelar", key=f"can_{s['id']}"):
-                    st.session_state[f"ed_{s['id']}"] = False
-                    st.rerun()
+                        payload = {"status": new_status, "prioridade": new_prio, "mecanico_id": m_id_edit, "descricao": new_desc, "data_inicio": new_dt_inicio.isoformat(), "data_fim": new_dt_fim.isoformat() if new_status == "Finalizado" else None}
+                        supabase.table('solicitacoes').update(payload).eq("id", s['id']).execute(); st.session_state[f"ed_{s['id']}"] = False; st.rerun()
+                if st.button("❌ Cancelar", key=f"can_{s['id']}"): st.session_state[f"ed_{s['id']}"] = False; st.rerun()
         st.divider()
