@@ -3,3 +3,4 @@ supabase
 openpyxl
 python-dotenv
 pandas
+xlsxwriter
