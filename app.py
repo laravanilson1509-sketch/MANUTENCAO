@@ -7,6 +7,21 @@ from supabase import create_client, Client
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gestão de Manutenção", layout="wide", page_icon="🔧")
 
+# CSS para forçar a tabela a não quebrar e permitir rolagem lateral no celular
+st.markdown("""
+    <style>
+    /* Faz com que o conteúdo das colunas não quebre linha e permita scroll */
+    [data-testid="column"] {
+        min-width: 120px;
+    }
+    @media (max-width: 800px) {
+        .stMain {
+            overflow-x: auto;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 # --- 2. CONEXÃO SEGURA ---
 URL_RAW = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
 KEY_RAW = st.secrets.get("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
@@ -65,7 +80,7 @@ if solicitacoes_metrics:
     c3.metric("Finalizados", len(df_m[df_m['status'] == 'Finalizado']))
     c4.metric("Urgentes", len(df_m[df_m['prioridade'] == 'Urgente']))
 
-# --- BARRA LATERAL (CADASTROS) ---
+# --- BARRA LATERAL (CADASTROS RESTAURADOS) ---
 with st.sidebar:
     st.header("⚙️ Configurações")
     if st.button("🔄 Atualizar Página"): st.rerun()
@@ -88,6 +103,12 @@ with st.sidebar:
                 supabase.table('usuarios').delete().eq("id", u['id']).execute(); st.rerun()
 
     with st.expander("🚜 Máquinas"):
+        with st.form("cad_q", clear_on_submit=True):
+            n_q = st.text_input("Nova Máquina")
+            if st.form_submit_button("Adicionar"):
+                if n_q:
+                    supabase.table('maquinas').insert({"nome": n_q}).execute()
+                    st.rerun()
         for q in maquinas_raw:
             c1, c2 = st.columns([3, 1])
             c1.write(q['nome'])
@@ -135,9 +156,10 @@ with st.expander("📝 NOVA ORDEM DE SERVIÇO"):
             }).execute()
             st.rerun()
 
-# --- 6. TABELA DE FILA ---
+# --- 6. TABELA DE FILA (VISUAL ORIGINAL RESTAURADO) ---
 if solicitacoes:
     st.divider()
+    # Usando o layout de colunas que você gosta
     cols = st.columns([0.8, 1.2, 1.0, 1.0, 0.9, 0.7, 0.7, 1.6, 1.8])
     labels = ["Abertura", "Máquina", "Mecânico", "Status", "Prioridade", "Início", "Fim", "Obs", "Ações"]
     for col, t in zip(cols, labels):
@@ -163,76 +185,56 @@ if solicitacoes:
         
         btns = r[8].columns(5)
         if s['status'] != "Finalizado" and btns[0].button("🏁", key=f"f_{s['id']}"):
-            supabase.table('solicitacoes').update({
-                "status": "Finalizado", 
-                "data_fim": date.today().isoformat()
-            }).eq("id", s['id']).execute()
+            supabase.table('solicitacoes').update({"status": "Finalizado", "data_fim": date.today().isoformat()}).eq("id", s['id']).execute()
             st.rerun()
 
         if btns[1].button("📝", key=f"e_{s['id']}"): 
             st.session_state[f"ed_{s['id']}"] = True
         
-        curr_o = s.get('ordem_manual', 0)
         if btns[2].button("🔼", key=f"u_{s['id']}"):
+            curr_o = s.get('ordem_manual', 0)
             supabase.table('solicitacoes').update({"ordem_manual": curr_o + 100}).eq("id", s['id']).execute(); st.rerun()
         if btns[3].button("🔽", key=f"d_{s['id']}"):
+            curr_o = s.get('ordem_manual', 0)
             supabase.table('solicitacoes').update({"ordem_manual": curr_o - 100}).eq("id", s['id']).execute(); st.rerun()
         if btns[4].button("🗑️", key=f"x_{s['id']}"):
             supabase.table('solicitacoes').delete().eq("id", s['id']).execute(); st.rerun()
 
-        # FORMULÁRIO DE EDIÇÃO
+        # FORMULÁRIO DE EDIÇÃO (COM EDIÇÃO DE DATAS)
         if st.session_state.get(f"ed_{s['id']}", False):
             with st.container(border=True):
                 with st.form(key=f"form_ed_{s['id']}"):
                     st.write(f"### Editar OS - {s['maquinas']['nome'] if s['maquinas'] else ''}")
                     e1, e2, e3 = st.columns(3)
                     
-                    new_status = e1.selectbox("Status", ["Pendente", "Em andamento", "Finalizado"], 
-                                             index=["Pendente", "Em andamento", "Finalizado"].index(s['status']))
-                    new_prio = e2.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Urgente"],
-                                           index=["Baixa", "Média", "Alta", "Urgente"].index(s['prioridade']))
+                    new_status = e1.selectbox("Status", ["Pendente", "Em andamento", "Finalizado"], index=["Pendente", "Em andamento", "Finalizado"].index(s['status']))
+                    new_prio = e2.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Urgente"], index=["Baixa", "Média", "Alta", "Urgente"].index(s['prioridade']))
                     
                     lista_mecs = [i['nome'] for i in mecanicos_raw]
                     idx_mec = lista_mecs.index(s['mecanicos']['nome']) if s['mecanicos'] and s['mecanicos']['nome'] in lista_mecs else 0
                     new_mec = e3.selectbox("Responsável", lista_mecs, index=idx_mec)
 
                     d1, d2 = st.columns(2)
-                    try:
-                        val_ini = datetime.strptime(s['data_inicio'], '%Y-%m-%d').date() if s['data_inicio'] else date.today()
-                    except:
-                        val_ini = date.today()
-                        
-                    try:
-                        val_fim = datetime.strptime(s['data_fim'], '%Y-%m-%d').date() if s['data_fim'] else date.today()
-                    except:
-                        val_fim = date.today()
+                    try: val_ini = datetime.strptime(s['data_inicio'], '%Y-%m-%d').date() if s['data_inicio'] else date.today()
+                    except: val_ini = date.today()
+                    try: val_fim = datetime.strptime(s['data_fim'], '%Y-%m-%d').date() if s['data_fim'] else date.today()
+                    except: val_fim = date.today()
 
                     new_dt_inicio = d1.date_input("Data Início", val_ini, key=f"dtin_{s['id']}")
                     new_dt_fim = d2.date_input("Data Fim", val_fim, key=f"dtfim_{s['id']}")
-                    
                     new_desc = st.text_area("Editar Observação", value=s['descricao'])
                     
-                    if st.form_submit_button("✅ Salvar Alterações", use_container_width=True):
+                    if st.form_submit_button("✅ Salvar"):
                         m_id_edit = next(i['id'] for i in mecanicos_raw if i['nome'] == new_mec)
-                        
                         payload = {
-                            "status": new_status,
-                            "prioridade": new_prio,
-                            "mecanico_id": m_id_edit,
-                            "descricao": new_desc,
-                            "data_inicio": new_dt_inicio.isoformat(),
+                            "status": new_status, "prioridade": new_prio, "mecanico_id": m_id_edit,
+                            "descricao": new_desc, "data_inicio": new_dt_inicio.isoformat(),
+                            "data_fim": new_dt_fim.isoformat() if new_status == "Finalizado" else None
                         }
-                        
-                        if new_status == "Finalizado":
-                            payload["data_fim"] = new_dt_fim.isoformat()
-                        else:
-                            payload["data_fim"] = None
-
                         supabase.table('solicitacoes').update(payload).eq("id", s['id']).execute()
                         st.session_state[f"ed_{s['id']}"] = False
                         st.rerun()
-                
-                if st.button("❌ Cancelar", key=f"can_{s['id']}", use_container_width=True):
+                if st.button("❌ Cancelar", key=f"can_{s['id']}"):
                     st.session_state[f"ed_{s['id']}"] = False
                     st.rerun()
         st.divider()
