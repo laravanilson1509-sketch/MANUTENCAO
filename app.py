@@ -1,273 +1,276 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime
-import os
 from io import BytesIO
 from supabase import create_client, Client
+from supabase.lib.client_options import ClientOptions
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Gestão de Manutenção", layout="wide", page_icon="🔧")
+st.set_page_config(page_title="INOVAFLEX - Gestão", layout="wide", page_icon="🔧")
 
-# CSS para evitar quebras de linha e melhorar visualização mobile
+# CSS Ajustado para garantir que as cores apareçam
 st.markdown("""
     <style>
-    [data-testid="column"] {
-        min-width: 90px; 
-        white-space: nowrap;
+    [data-testid="column"] { min-width: 95px !important; white-space: nowrap !important; }
+    .main .block-container { padding-left: 1rem; padding-right: 1rem; }
+    .login-container { 
+        max-width: 400px; margin: 50px auto; padding: 30px; 
+        border-radius: 15px; background-color: #1e1e1e; border: 1px solid #333; 
     }
-    .main .block-container {
-        padding-left: 1rem;
-        padding-right: 1rem;
-        overflow-x: auto;
-    }
+    .stButton>button { width: 100% !important; font-weight: bold !important; }
+    div[data-testid="stForm"] .stButton>button { background-color: #ff5e00 !important; color: white !important; }
+    
+    /* Cores das Prioridades */
+    .p-urgente { color: #ff4b4b !important; font-weight: bold; border-left: 4px solid #ff4b4b; padding-left: 5px; }
+    .p-alta { color: #ffa500 !important; font-weight: bold; border-left: 4px solid #ffa500; padding-left: 5px; }
+    .p-media { color: #f1c40f !important; font-weight: bold; border-left: 4px solid #f1c40f; padding-left: 5px; }
+    .p-baixa { color: #2ecc71 !important; font-weight: bold; border-left: 4px solid #2ecc71; padding-left: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
-# Função para formatar data padrão BR abreviado (Ex: 21/04/26)
 def formatar_data_br(data_str):
-    if not data_str or data_str == "---":
-        return "---"
-    try:
-        return datetime.strptime(data_str, '%Y-%m-%d').strftime('%d/%m/%y')
-    except:
-        return data_str
+    if not data_str or data_str == "---": return "---"
+    try: return datetime.strptime(data_str, '%Y-%m-%d').strftime('%d/%m/%y')
+    except: return data_str
 
-# --- 2. CONEXÃO SEGURA ---
-URL_RAW = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
-KEY_RAW = st.secrets.get("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
-
-if not URL_RAW or not KEY_RAW:
-    st.error("## ❌ Credenciais não encontradas!")
-    st.stop()
-
-URL = URL_RAW.strip().replace(" ", "")
-KEY = KEY_RAW.strip().replace(" ", "")
+# --- 2. CONEXÃO ---
+URL = st.secrets.get("SUPABASE_URL")
+ANON = st.secrets.get("SUPABASE_ANON_KEY")
+SERVICE = st.secrets.get("SUPABASE_SERVICE_KEY")
 
 @st.cache_resource
-def conectar():
-    return create_client(URL, KEY)
+def conectar_admin():
+    return create_client(URL, SERVICE)
 
-try:
-    supabase = conectar()
-except Exception as e:
-    st.error(f"Erro ao conectar ao banco: {e}")
+supabase_admin = conectar_admin()
+
+# --- 3. LOGIN ---
+if 'authenticated' not in st.session_state:
+    st.session_state['authenticated'] = False
+
+def realizar_login(usuario, password):
+    try:
+        u_limpo = usuario.strip().lower()
+        email_fake = f"{u_limpo}@inovaflex.com"
+        res = supabase_admin.auth.sign_in_with_password({"email": email_fake, "password": password.strip()})
+        if res.user:
+            perfil = supabase_admin.table('perfis').select('nivel').eq('id', res.user.id).execute()
+            if perfil.data:
+                st.session_state['authenticated'] = True
+                st.session_state['user_token'] = res.session.access_token
+                st.session_state['user_id'] = res.user.id
+                st.session_state['user_nickname'] = u_limpo
+                st.session_state['user_level'] = perfil.data[0]['nivel']
+                st.rerun()
+    except Exception:
+        st.error(f"Erro: Usuário ou senha inválidos.")
+
+if not st.session_state['authenticated']:
+    st.markdown('<div class="login-container">', unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center; color:#ff5e00;'>INOVAFLEX</h2>", unsafe_allow_html=True)
+    with st.form("login_form"):
+        u_input = st.text_input("Usuário")
+        p_input = st.text_input("Senha", type="password")
+        if st.form_submit_button("ENTRAR"):
+            realizar_login(u_input, p_input)
+    st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
-# --- 3. FUNÇÕES DE DADOS ---
+try:
+    opts = ClientOptions(headers={"Authorization": f"Bearer {st.session_state['user_token']}"})
+    supabase = create_client(URL, ANON, options=opts)
+except:
+    supabase = supabase_admin
+
+# --- 4. FUNÇÕES ---
 def carregar_listas():
     try:
-        u = supabase.table('usuarios').select('id, nome').order('nome').execute()
-        m = supabase.table('mecanicos').select('id, nome').order('nome').execute()
         q = supabase.table('maquinas').select('id, nome').order('nome').execute()
-        return u.data, m.data, q.data
-    except:
-        return [], [], []
+        return q.data if q.data else []
+    except: return []
 
-def carregar_solicitacoes(ordem_por):
+def carregar_solicitacoes(maquina_id, nivel, uid):
     try:
-        col = 'ordem_manual'
-        if ordem_por == "Prioridade": col = 'prioridade'
-        elif ordem_por == "Data Solicitação": col = 'data_solicitacao'
-        
-        s = supabase.table('solicitacoes').select(
-            '*, usuarios(nome), mecanicos(nome), maquinas(nome)'
-        ).order(col, desc=True).execute()
-        return s.data
-    except:
-        return []
+        query = supabase.table('solicitacoes').select('*, maquinas(nome)')
+        if nivel == 'operador': query = query.eq('criado_por_uuid', uid)
+        if maquina_id and maquina_id != "Todas": query = query.eq('maquina_id', maquina_id)
+        return query.order('ordem_manual', desc=True).execute().data
+    except: return []
 
-# --- FUNÇÃO EXCEL AJUSTADA (MAIS ROBUSTA) ---
-def gerar_excel(dados):
-    if not dados or len(dados) == 0: 
-        return None
-    try:
-        df_export = pd.DataFrame(dados)
-        
-        # Extração segura dos nomes (caso o relacionamento venha nulo)
-        df_export['Solicitante'] = df_export['usuarios'].apply(lambda x: x['nome'] if isinstance(x, dict) else '---')
-        df_export['Maquina'] = df_export['maquinas'].apply(lambda x: x['nome'] if isinstance(x, dict) else '---')
-        df_export['Mecanico'] = df_export['mecanicos'].apply(lambda x: x['nome'] if isinstance(x, dict) else '---')
-        
-        colunas_map = {
-            'data_solicitacao': 'Data Abertura', 
-            'Solicitante': 'Solicitante',
-            'Maquina': 'Equipamento', 
-            'Mecanico': 'Mecanico Responsavel', 
-            'status': 'Status',
-            'prioridade': 'Prioridade', 
-            'data_inicio': 'Data Inicio', 
-            'data_fim': 'Data Fim', 
-            'descricao': 'Observacoes'
-        }
-        
-        # Filtra apenas colunas que existem no DF para evitar erro de KeyError
-        colunas_existentes = [c for c in colunas_map.keys() if c in df_export.columns]
-        df_final = df_export[colunas_existentes].rename(columns=colunas_map)
-        
-        output = BytesIO()
-        # Engine explicita xlsxwriter
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df_final.to_excel(writer, index=False, sheet_name='Manutencoes')
-            # Ajuste automático de largura de colunas no Excel
-            worksheet = writer.sheets['Manutencoes']
-            for i, col in enumerate(df_final.columns):
-                column_len = max(df_final[col].astype(str).str.len().max(), len(col)) + 2
-                worksheet.set_column(i, i, column_len)
-        
-        return output.getvalue()
-    except Exception as e:
-        st.sidebar.error(f"Erro ao gerar Excel: {e}")
-        return None
+# Otimização do Relatório (Cache para carregar instantâneo)
+@st.cache_data(show_spinner=False)
+def gerar_excel_cache(dados):
+    if not dados: return None
+    df = pd.DataFrame(dados)
+    if 'maquinas' in df.columns:
+        df['Máquina'] = df['maquinas'].apply(lambda x: x['nome'] if x else '---')
+    out = BytesIO()
+    with pd.ExcelWriter(out, engine='xlsxwriter') as wr:
+        cols = ['data_solicitacao','Máquina','status','prioridade','descricao','data_inicio','data_fim']
+        df[[c for c in cols if c in df.columns]].to_excel(wr, index=False)
+    return out.getvalue()
 
-# --- 4. INTERFACE ---
-st.title("🔧 Plano de Manutenção")
-usuarios_raw, mecanicos_raw, maquinas_raw = carregar_listas()
-solicitacoes_all = carregar_solicitacoes("Fila Manual")
+# --- 5. INTERFACE (SIDEBAR) ---
+maquinas_raw = carregar_listas()
+nivel_atual = st.session_state.get('user_level', 'operador')
+e_admin = nivel_atual == 'admin'
+e_mecanico = nivel_atual == 'mecanico' or e_admin
 
-# --- INDICADORES (CARDS) ---
-if solicitacoes_all:
-    df_m = pd.DataFrame(solicitacoes_all)
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Pendentes", len(df_m[df_m['status'] == 'Pendente']))
-    c2.metric("Em andamento", len(df_m[df_m['status'] == 'Em andamento']))
-    c3.metric("Finalizados", len(df_m[df_m['status'] == 'Finalizado']))
-    c4.metric("Urgentes", len(df_m[df_m['prioridade'] == 'Urgente']))
-
-# --- BARRA LATERAL (CADASTROS RESTAURADOS) ---
 with st.sidebar:
-    st.header("⚙️ Configurações")
-    if st.button("🔄 Atualizar Página"): st.rerun()
-    ordem_sel = st.selectbox("Ordenar por:", ["Fila Manual", "Prioridade", "Data Solicitação"])
-    
-    st.divider()
-    st.subheader("📊 Relatórios")
-    
-    # Geração do arquivo Excel
-    excel_data = gerar_excel(solicitacoes_all)
-    if excel_data:
-        st.download_button(
-            label="📥 Baixar Relatório Excel",
-            data=excel_data,
-            file_name=f"relatorio_manutencao_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-    else:
-        st.info("Sem dados para exportar.")
+    st.markdown("### ⚙️ Configurações")
+    st.write(f"Usuário: **{st.session_state['user_nickname']}**")
+    if st.button("🚪 Sair"):
+        for k in list(st.session_state.keys()): del st.session_state[k]
+        st.rerun()
+
+    # BOTÃO DE RELATÓRIO NA CONFIGURAÇÃO (Otimizado)
+    if 'dados_atuais' in st.session_state and st.session_state.dados_atuais:
+        st.divider()
+        st.write("📊 Exportar Dados")
+        # Gera o excel apenas se os dados mudarem
+        excel_bin = gerar_excel_cache(st.session_state.dados_atuais)
+        st.download_button("📥 Baixar Relatório", excel_bin, "relatorio.xlsx", use_container_width=True)
 
     st.divider()
-    st.header("➕ Gerenciar Cadastros")
+    with st.expander("🔑 Alterar Minha Senha"):
+        with st.form("alt_pass"):
+            nova_p = st.text_input("Nova Senha", type="password")
+            if st.form_submit_button("Atualizar"):
+                if len(nova_p) >= 6:
+                    supabase.auth.update_user({"password": nova_p})
+                    st.success("Senha alterada!")
+                else: st.error("Mínimo 6 caracteres.")
     
-    with st.expander("👤 Usuários"):
-        with st.form("cad_u", clear_on_submit=True):
-            n_u = st.text_input("Novo Usuário")
-            if st.form_submit_button("Adicionar"):
-                if n_u: supabase.table('usuarios').insert({"nome": n_u}).execute(); st.rerun()
-        for u in usuarios_raw:
-            c1, c2 = st.columns([3, 1])
-            c1.write(u['nome'])
-            if c2.button("🗑️", key=f"del_u_{u['id']}"):
-                supabase.table('usuarios').delete().eq("id", u['id']).execute(); st.rerun()
+    if e_admin:
+        with st.expander("🔐 Cadastrar Funcionário"):
+            with st.form("cad_user", clear_on_submit=True):
+                nu = st.text_input("Nome")
+                ns = st.text_input("Senha", type="password")
+                nl = st.selectbox("Perfil", ["operador", "mecanico", "admin"])
+                if st.form_submit_button("Criar"):
+                    em = f"{nu.strip().lower()}@inovaflex.com"
+                    u_a = supabase_admin.auth.admin.create_user({"email": em, "password": ns, "email_confirm": True})
+                    supabase_admin.table('perfis').insert({"id": u_a.user.id, "email": em, "nivel": nl}).execute()
+                    st.success("Criado!")
 
     with st.expander("🚜 Máquinas"):
-        with st.form("cad_q", clear_on_submit=True):
-            n_q = st.text_input("Nova Máquina")
-            if st.form_submit_button("Adicionar"):
-                if n_q: supabase.table('maquinas').insert({"nome": n_q}).execute(); st.rerun()
+        if e_mecanico:
+            nm = st.text_input("Nova Máquina")
+            if st.button("Adicionar") and nm:
+                supabase.table('maquinas').insert({"nome": nm}).execute(); st.rerun()
+        st.write("---")
         for q in maquinas_raw:
-            c1, c2 = st.columns([3, 1])
-            c1.write(q['nome'])
-            if c2.button("🗑️", key=f"del_q_{q['id']}"):
+            c1, c2 = st.columns([4, 1])
+            c1.caption(f"📍 {q['nome']}")
+            if e_mecanico and c2.button("🗑️", key=f"mq_{q['id']}"):
                 supabase.table('maquinas').delete().eq("id", q['id']).execute(); st.rerun()
 
-    with st.expander("👨‍🔧 Mecânicos"):
-        with st.form("cad_m", clear_on_submit=True):
-            n_m = st.text_input("Novo Mecânico")
-            if st.form_submit_button("Adicionar"):
-                if n_m: supabase.table('mecanicos').insert({"nome": n_m}).execute(); st.rerun()
-        for m in mecanicos_raw:
-            c1, c2 = st.columns([3, 1])
-            c1.write(m['nome'])
-            if c2.button("🗑️", key=f"del_m_{m['id']}"):
-                supabase.table('mecanicos').delete().eq("id", m['id']).execute(); st.rerun()
+# --- 6. PLANO DE MANUTENÇÃO ---
+st.header("🔧 Plano de Manutenção")
 
-# --- 5. NOVA ORDEM DE SERVIÇO ---
-solicitacoes = carregar_solicitacoes(ordem_sel)
-with st.expander("📝 NOVA ORDEM DE SERVIÇO"):
-    with st.form("f_nova", clear_on_submit=True):
-        c1, c2, c3 = st.columns(3)
-        u_sel = c1.selectbox("Solicitante", [i['nome'] for i in usuarios_raw])
-        m_sel = c2.selectbox("Máquina", [i['nome'] for i in maquinas_raw])
-        prio_sel = c3.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Urgente"])
-        c4, c5 = st.columns(2)
-        mec_sel = c4.selectbox("Mecânico Responsável", ["Nenhum"] + [i['nome'] for i in mecanicos_raw])
-        dt_i = c5.date_input("Data de Início", date.today())
-        desc = st.text_area("Observação / Descrição do Problema")
-        if st.form_submit_button("🔨 Abrir Ordem de Serviço", use_container_width=True):
-            u_id = next(i['id'] for i in usuarios_raw if i['nome'] == u_sel)
-            m_id = next(i['id'] for i in maquinas_raw if i['nome'] == m_sel)
-            mec_id = next((i['id'] for i in mecanicos_raw if i['nome'] == mec_sel), None)
-            supabase.table('solicitacoes').insert({
-                "usuario_id": u_id, "maquina_id": m_id, "mecanico_id": mec_id, "descricao": desc,
-                "prioridade": prio_sel, "status": "Pendente", "data_solicitacao": date.today().isoformat(),
-                "data_inicio": dt_i.isoformat(), "ordem_manual": int(datetime.now().timestamp())
-            }).execute(); st.rerun()
+if 'os_form_key' not in st.session_state: st.session_state.os_form_key = 0
+with st.expander("📝 ABRIR NOVA ORDEM DE SERVIÇO"):
+    with st.form(key=f"nova_os_{st.session_state.os_form_key}"):
+        c1, c2 = st.columns(2)
+        mq = c1.selectbox("Máquina", ["Selecione..."] + [m['nome'] for m in maquinas_raw])
+        pr = c2.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Urgente"])
+        ds = st.text_area("Descrição do Defeito", value="")
+        if st.form_submit_button("GERAR ORDEM DE SERVIÇO"):
+            if mq != "Selecione..." and ds:
+                mid = next(m['id'] for m in maquinas_raw if m['nome'] == mq)
+                supabase.table('solicitacoes').insert({
+                    "maquina_id": mid, "descricao": ds, "prioridade": pr, "status": "Pendente",
+                    "data_solicitacao": date.today().isoformat(), "criado_por_uuid": st.session_state['user_id'],
+                    "ordem_manual": int(datetime.now().timestamp())
+                }).execute()
+                st.session_state.os_form_key += 1
+                st.rerun()
 
-# --- 6. TABELA DE FILA ---
-if solicitacoes:
-    st.divider()
-    cols = st.columns([0.8, 1.2, 1.0, 1.0, 0.9, 0.8, 0.8, 1.6, 1.8])
-    labels = ["Abertura", "Máquina", "Mecânico", "Status", "Prioridade", "Início", "Fim", "Obs", "Ações"]
-    for col, t in zip(cols, labels): col.markdown(f"**{t}**")
+# --- 7. FILA DE TRABALHO ---
+st.divider()
+st.subheader("📋 Fila de Trabalho")
+
+if 'f_reset' not in st.session_state: st.session_state.f_reset = 0
+op_filt = [{"id": "", "nome": "Selecione uma máquina..."}] + [{"id": "Todas", "nome": "TODAS AS MÁQUINAS"}] + maquinas_raw
+
+c_f1, c_f2 = st.columns([3, 1])
+with c_f1:
+    filtro_id = st.selectbox("Filtrar por Máquina:", [o['id'] for o in op_filt], format_func=lambda x: next(o['nome'] for o in op_filt if o['id'] == x), key=f"f_{st.session_state.f_reset}")
+with c_f2:
+    st.write("")
+    if st.button("🧹 Limpar Filtros"):
+        st.session_state.f_reset += 1
+        st.session_state.dados_atuais = []
+        st.rerun()
+
+if filtro_id == "":
+    st.info("💡 Selecione uma máquina para carregar a fila.")
+else:
+    lista = carregar_solicitacoes(filtro_id, nivel_atual, st.session_state['user_id'])
+    st.session_state.dados_atuais = lista
     
-    for s in solicitacoes:
-        r = st.columns([0.8, 1.2, 1.0, 1.0, 0.9, 0.8, 0.8, 1.6, 1.8])
-        r[0].write(formatar_data_br(s['data_solicitacao']))
-        r[1].write(f"**{s['maquinas']['nome'] if s['maquinas'] else '---'}**")
-        r[2].write(s['mecanicos']['nome'] if s['mecanicos'] else "---")
-        status_map = {"Pendente": "🟦 Pendente", "Em andamento": "🟧 Em andamento", "Finalizado": "🟩 Finalizado"}
-        r[3].write(status_map.get(s['status'], s['status']))
-        p = s['prioridade']
-        cor_p = "🟢 Baixa" if p == "Baixa" else "🟡 Média" if p == "Média" else "🟠 Alta" if p == "Alta" else "🔴 Urgente"
-        r[4].write(cor_p)
-        r[5].write(formatar_data_br(s['data_inicio']))
-        r[6].write(formatar_data_br(s.get('data_fim', '---')))
-        r[7].caption(s['descricao'] if s['descricao'] else "---")
+    if lista:
+        header = st.columns([0.8, 1.2, 1.0, 1.0, 0.9, 0.8, 1.6, 2.2])
+        titulos = ["Data","Máquina","Status","Prioridade","Início","Fim","Defeito","Ações"]
+        for col, t in zip(header, titulos): col.markdown(f"**{t}**")
         
-        btns = r[8].columns(5)
-        if s['status'] != "Finalizado" and btns[0].button("🏁", key=f"f_{s['id']}"):
-            supabase.table('solicitacoes').update({"status": "Finalizado", "data_fim": date.today().isoformat()}).eq("id", s['id']).execute(); st.rerun()
-        if btns[1].button("📝", key=f"e_{s['id']}"): st.session_state[f"ed_{s['id']}"] = True
-        curr_o = s.get('ordem_manual', 0)
-        if btns[2].button("🔼", key=f"u_{s['id']}"):
-            supabase.table('solicitacoes').update({"ordem_manual": curr_o + 100}).eq("id", s['id']).execute(); st.rerun()
-        if btns[3].button("🔽", key=f"d_{s['id']}"):
-            supabase.table('solicitacoes').update({"ordem_manual": curr_o - 100}).eq("id", s['id']).execute(); st.rerun()
-        if btns[4].button("🗑️", key=f"x_{s['id']}"):
-            supabase.table('solicitacoes').delete().eq("id", s['id']).execute(); st.rerun()
+        for i, s in enumerate(lista):
+            r = st.columns([0.8, 1.2, 1.0, 1.0, 0.9, 0.8, 1.6, 2.2])
+            r[0].write(formatar_data_br(s['data_solicitacao']))
+            r[1].write(f"**{s['maquinas']['nome']}**")
+            r[2].write(s['status'])
+            
+            # PRIORIDADE COM CORES FIXAS
+            p = s['prioridade']
+            if p == "Urgente": r[3].markdown(f'<div class="p-urgente">🔴 {p}</div>', unsafe_allow_html=True)
+            elif p == "Alta": r[3].markdown(f'<div class="p-alta">🟠 {p}</div>', unsafe_allow_html=True)
+            elif p == "Média": r[3].markdown(f'<div class="p-media">🟡 {p}</div>', unsafe_allow_html=True)
+            else: r[3].markdown(f'<div class="p-baixa">🟢 {p}</div>', unsafe_allow_html=True)
+            
+            r[4].write(formatar_data_br(s.get('data_inicio')))
+            r[5].write(formatar_data_br(s.get('data_fim')))
+            r[6].caption(s['descricao'])
+            
+            b = r[7].columns(5)
+            if e_mecanico:
+                if b[0].button("🏁", key=f"f{s['id']}"):
+                    supabase.table('solicitacoes').update({"status":"Finalizado","data_fim":date.today().isoformat()}).eq("id",s['id']).execute(); st.rerun()
+                if b[1].button("📝", key=f"e{s['id']}"): st.session_state[f"ed{s['id']}"] = True
+                
+                ov = s.get('ordem_manual', 0)
+                if b[2].button("🔼", key=f"u{s['id']}"):
+                    if i > 0:
+                        outro = lista[i-1]
+                        supabase.table('solicitacoes').update({"ordem_manual": outro['ordem_manual']}).eq("id", s['id']).execute()
+                        supabase.table('solicitacoes').update({"ordem_manual": ov}).eq("id", outro['id']).execute()
+                        st.rerun()
+                if b[3].button("🔽", key=f"d{s['id']}"):
+                    if i < len(lista) - 1:
+                        outro = lista[i+1]
+                        supabase.table('solicitacoes').update({"ordem_manual": outro['ordem_manual']}).eq("id", s['id']).execute()
+                        supabase.table('solicitacoes').update({"ordem_manual": ov}).eq("id", outro['id']).execute()
+                        st.rerun()
+            if e_admin and b[4].button("🗑️", key=f"x{s['id']}"):
+                supabase.table('solicitacoes').delete().eq("id", s['id']).execute(); st.rerun()
 
-        # FORMULÁRIO DE EDIÇÃO
-        if st.session_state.get(f"ed_{s['id']}", False):
-            with st.container(border=True):
-                with st.form(key=f"form_ed_{s['id']}"):
-                    st.write(f"### Editar OS")
-                    e1, e2, e3 = st.columns(3)
-                    new_status = e1.selectbox("Status", ["Pendente", "Em andamento", "Finalizado"], index=["Pendente", "Em andamento", "Finalizado"].index(s['status']))
-                    new_prio = e2.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Urgente"], index=["Baixa", "Média", "Alta", "Urgente"].index(s['prioridade']))
-                    lista_mecs = [i['nome'] for i in mecanicos_raw]
-                    idx_mec = lista_mecs.index(s['mecanicos']['nome']) if s['mecanicos'] and s['mecanicos']['nome'] in lista_mecs else 0
-                    new_mec = e3.selectbox("Responsável", lista_mecs, index=idx_mec)
-                    d1, d2 = st.columns(2)
-                    try: val_ini = datetime.strptime(s['data_inicio'], '%Y-%m-%d').date() if s['data_inicio'] else date.today()
-                    except: val_ini = date.today()
-                    try: val_fim = datetime.strptime(s['data_fim'], '%Y-%m-%d').date() if s['data_fim'] else date.today()
-                    except: val_fim = date.today()
-                    new_dt_inicio = d1.date_input("Início", val_ini, key=f"dtin_{s['id']}")
-                    new_dt_fim = d2.date_input("Fim", val_fim, key=f"dtfim_{s['id']}")
-                    new_desc = st.text_area("Observação", value=s['descricao'])
-                    if st.form_submit_button("✅ Salvar"):
-                        m_id_edit = next(i['id'] for i in mecanicos_raw if i['nome'] == new_mec)
-                        payload = {"status": new_status, "prioridade": new_prio, "mecanico_id": m_id_edit, "descricao": new_desc, "data_inicio": new_dt_inicio.isoformat(), "data_fim": new_dt_fim.isoformat() if new_status == "Finalizado" else None}
-                        supabase.table('solicitacoes').update(payload).eq("id", s['id']).execute(); st.session_state[f"ed_{s['id']}"] = False; st.rerun()
-                if st.button("❌ Cancelar", key=f"can_{s['id']}"): st.session_state[f"ed_{s['id']}"] = False; st.rerun()
-        st.divider()
+            if st.session_state.get(f"ed{s['id']}", False):
+                with st.container(border=True):
+                    with st.form(f"ed_{s['id']}"):
+                        st.subheader(f"Editar: {s['maquinas']['nome']}")
+                        e1, e2 = st.columns(2)
+                        st_at = e1.selectbox("Status", ["Pendente", "Em andamento", "Finalizado"])
+                        pr_at = e2.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Urgente"])
+                        d1, d2 = st.columns(2)
+                        n_ini = d1.date_input("Início", value=None)
+                        n_fim = d2.date_input("Fim", value=None)
+                        ds_at = st.text_area("Novas Observações", value="")
+                        if st.form_submit_button("SALVAR"):
+                            upd = {"status": st_at, "prioridade": pr_at, "descricao": ds_at if ds_at.strip() != "" else s['descricao']}
+                            if n_ini: upd["data_inicio"] = n_ini.isoformat()
+                            if n_fim: upd["data_fim"] = n_fim.isoformat()
+                            supabase.table('solicitacoes').update(upd).eq("id", s['id']).execute()
+                            st.session_state[f"ed{s['id']}"] = False
+                            st.rerun()
+                    if st.button("FECHAR", key=f"cl_{s['id']}"):
+                        st.session_state[f"ed{s['id']}"] = False
+                        st.rerun()
