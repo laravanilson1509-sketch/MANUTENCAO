@@ -190,7 +190,7 @@ with st.expander("📝 ABRIR NOVA ORDEM DE SERVIÇO"):
         c1, c2 = st.columns(2)
         mq = c1.selectbox("Máquina", ["Selecione..."] + [m['nome'] for m in maquinas_raw])
         pr = c2.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Urgente"])
-        ds = st.text_area("Descrição do Defeito", value="")
+        ds = st.text_area("Descrição da Solicitação", value="")
         if st.form_submit_button("GERAR ORDEM DE SERVIÇO"):
             if mq != "Selecione..." and ds:
                 mid = next(m['id'] for m in maquinas_raw if m['nome'] == mq)
@@ -237,7 +237,7 @@ if btn_filtrar or (f_id != "" and 'dados_atuais' in st.session_state):
         
         if lista:
             header = st.columns([0.8, 1.2, 1.0, 1.0, 0.9, 0.8, 1.6, 2.2])
-            titulos = ["Data","Máquina","Status","Prioridade","Início","Fim","Defeito","Ações"]
+            titulos = ["Data","Máquina","Status","Prioridade","Início","Fim","Solicitação","Ações"]
             for col, t in zip(header, titulos): col.markdown(f"**{t}**")
             
             for i, s in enumerate(lista):
