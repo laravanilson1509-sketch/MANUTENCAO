@@ -8,7 +8,6 @@ from supabase.lib.client_options import ClientOptions
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="INOVAFLEX - Gestão", layout="wide", page_icon="🔧")
 
-# CSS Ajustado para garantir que as cores apareçam
 st.markdown("""
     <style>
     [data-testid="column"] { min-width: 95px !important; white-space: nowrap !important; }
@@ -20,7 +19,6 @@ st.markdown("""
     .stButton>button { width: 100% !important; font-weight: bold !important; }
     div[data-testid="stForm"] .stButton>button { background-color: #ff5e00 !important; color: white !important; }
     
-    /* Cores das Prioridades */
     .p-urgente { color: #ff4b4b !important; font-weight: bold; border-left: 4px solid #ff4b4b; padding-left: 5px; }
     .p-alta { color: #ffa500 !important; font-weight: bold; border-left: 4px solid #ffa500; padding-left: 5px; }
     .p-media { color: #f1c40f !important; font-weight: bold; border-left: 4px solid #f1c40f; padding-left: 5px; }
@@ -89,11 +87,13 @@ def carregar_listas():
         return q.data if q.data else []
     except: return []
 
-def carregar_solicitacoes(maquina_id, nivel, uid):
+def carregar_solicitacoes(maquina_id, nivel, uid, f_status=None, f_prioridade=None):
     try:
         query = supabase.table('solicitacoes').select('*, maquinas(nome)')
         if nivel == 'operador': query = query.eq('criado_por_uuid', uid)
         if maquina_id and maquina_id != "Todas": query = query.eq('maquina_id', maquina_id)
+        if f_status and f_status != "Todos": query = query.eq('status', f_status)
+        if f_prioridade and f_prioridade != "Todas": query = query.eq('prioridade', f_prioridade)
         return query.order('ordem_manual', desc=True).execute().data
     except: return []
 
@@ -150,17 +150,36 @@ with st.sidebar:
                     supabase_admin.table('perfis').insert({"id": u_a.user.id, "email": em, "nivel": nl}).execute()
                     st.success("Criado!")
 
-    with st.expander(" Máquinas"):
+    with st.expander("🚜 Gestão de Máquinas"):
         if e_mecanico:
             nm = st.text_input("Nova Máquina")
             if st.button("Adicionar") and nm:
                 supabase.table('maquinas').insert({"nome": nm}).execute(); st.rerun()
         st.write("---")
         for q in maquinas_raw:
-            c1, c2 = st.columns([4, 1])
+            c1, c2, c3 = st.columns([3, 1, 1])
             c1.caption(f"📍 {q['nome']}")
-            if e_mecanico and c2.button("🗑️", key=f"mq_{q['id']}"):
-                supabase.table('maquinas').delete().eq("id", q['id']).execute(); st.rerun()
+            
+            # Editar Nome da Máquina
+            if e_mecanico and c2.button("📝", key=f"ed_mq_{q['id']}"):
+                st.session_state[f"edit_mode_mq_{q['id']}"] = True
+            
+            # Deletar Máquina (Com regra de integridade)
+            if e_mecanico and c3.button("🗑️", key=f"mq_{q['id']}"):
+                check = supabase.table('solicitacoes').select('id', count='exact').eq('maquina_id', q['id']).execute()
+                if check.count > 0:
+                    st.error(f"Não é possível excluir. A máquina '{q['nome']}' possui {check.count} registros.")
+                else:
+                    supabase.table('maquinas').delete().eq("id", q['id']).execute(); st.rerun()
+            
+            # Sub-form para editar nome
+            if st.session_state.get(f"edit_mode_mq_{q['id']}", False):
+                with st.form(f"f_ed_mq_{q['id']}"):
+                    novo_nome = st.text_input("Novo nome:", value=q['nome'])
+                    if st.form_submit_button("Salvar"):
+                        supabase.table('maquinas').update({"nome": novo_nome}).eq("id", q['id']).execute()
+                        st.session_state[f"edit_mode_mq_{q['id']}"] = False
+                        st.rerun()
 
 # --- 6. PLANO DE MANUTENÇÃO ---
 st.header("🔧 Plano de Manutenção")
@@ -183,112 +202,116 @@ with st.expander("📝 ABRIR NOVA ORDEM DE SERVIÇO"):
                 st.session_state.os_form_key += 1
                 st.rerun()
 
-# --- 7. FILA DE TRABALHO ---
+# --- 7. FILA DE MANUTENÇÃO ---
 st.divider()
-st.subheader("📋 Fila de Trabalho")
+st.subheader("📋 Fila de Manutenção")
 
 if 'f_reset' not in st.session_state: st.session_state.f_reset = 0
 op_filt = [{"id": "", "nome": "Selecione uma máquina..."}] + [{"id": "Todas", "nome": "TODAS AS MÁQUINAS"}] + maquinas_raw
 
-c_f1, c_f2 = st.columns([3, 1])
-with c_f1:
-    filtro_id = st.selectbox("Filtrar por Máquina:", [o['id'] for o in op_filt], format_func=lambda x: next(o['nome'] for o in op_filt if o['id'] == x), key=f"f_{st.session_state.f_reset}")
-with c_f2:
-    st.write("")
-    if st.button("🧹 Limpar Filtros"):
-        st.session_state.f_reset += 1
-        st.session_state.dados_atuais = []
-        st.rerun()
+with st.container(border=True):
+    c_f1, c_f2, c_f3, c_f4, c_f5 = st.columns([2, 1, 1, 1, 1])
+    with c_f1:
+        f_id = st.selectbox("Máquina:", [o['id'] for o in op_filt], format_func=lambda x: next(o['nome'] for o in op_filt if o['id'] == x), key=f"f_mq_{st.session_state.f_reset}")
+    with c_f2:
+        f_st = st.selectbox("Status:", ["Todos", "Pendente", "Em andamento", "Finalizado"], key=f"f_st_{st.session_state.f_reset}")
+    with c_f3:
+        f_pr = st.selectbox("Prioridade:", ["Todas", "Baixa", "Média", "Alta", "Urgente"], key=f"f_pr_{st.session_state.f_reset}")
+    with c_f4:
+        st.write("")
+        btn_filtrar = st.button("🔍 FILTRAR", type="primary")
+    with c_f5:
+        st.write("")
+        if st.button("🧹 Limpar"):
+            st.session_state.f_reset += 1
+            st.session_state.dados_atuais = []
+            st.rerun()
 
-if filtro_id == "":
-    st.info("💡 Selecione uma máquina para carregar a fila.")
-else:
-    lista = carregar_solicitacoes(filtro_id, nivel_atual, st.session_state['user_id'])
-    st.session_state.dados_atuais = lista
-    
-    if lista:
-        header = st.columns([0.8, 1.2, 1.0, 1.0, 0.9, 0.8, 1.6, 2.2])
-        titulos = ["Data","Máquina","Status","Prioridade","Início","Fim","Defeito","Ações"]
-        for col, t in zip(header, titulos): col.markdown(f"**{t}**")
+# Lógica de Gatilho do Filtro
+if btn_filtrar or (f_id != "" and 'dados_atuais' in st.session_state):
+    if f_id == "":
+        st.warning("Selecione pelo menos uma máquina ou 'Todas' para filtrar.")
+    else:
+        lista = carregar_solicitacoes(f_id, nivel_atual, st.session_state['user_id'], f_st, f_pr)
+        st.session_state.dados_atuais = lista
         
-        for i, s in enumerate(lista):
-            r = st.columns([0.8, 1.2, 1.0, 1.0, 0.9, 0.8, 1.6, 2.2])
-            r[0].write(formatar_data_br(s['data_solicitacao']))
-            r[1].write(f"**{s['maquinas']['nome']}**")
-            r[2].write(s['status'])
+        if lista:
+            header = st.columns([0.8, 1.2, 1.0, 1.0, 0.9, 0.8, 1.6, 2.2])
+            titulos = ["Data","Máquina","Status","Prioridade","Início","Fim","Defeito","Ações"]
+            for col, t in zip(header, titulos): col.markdown(f"**{t}**")
             
-            # PRIORIDADE COM CORES
-            p = s['prioridade']
-            if p == "Urgente": r[3].markdown(f'<div class="p-urgente">🔴 {p}</div>', unsafe_allow_html=True)
-            elif p == "Alta": r[3].markdown(f'<div class="p-alta">🟠 {p}</div>', unsafe_allow_html=True)
-            elif p == "Média": r[3].markdown(f'<div class="p-media">🟡 {p}</div>', unsafe_allow_html=True)
-            else: r[3].markdown(f'<div class="p-baixa">🟢 {p}</div>', unsafe_allow_html=True)
-            
-            r[4].write(formatar_data_br(s.get('data_inicio')))
-            r[5].write(formatar_data_br(s.get('data_fim')))
-            r[6].caption(s['descricao'])
-            
-            b = r[7].columns(5)
-            if e_mecanico:
-                if b[0].button("🏁", key=f"f{s['id']}"):
-                    supabase.table('solicitacoes').update({"status":"Finalizado","data_fim":date.today().isoformat()}).eq("id",s['id']).execute(); st.rerun()
-                if b[1].button("📝", key=f"e{s['id']}"): st.session_state[f"ed{s['id']}"] = True
+            for i, s in enumerate(lista):
+                r = st.columns([0.8, 1.2, 1.0, 1.0, 0.9, 0.8, 1.6, 2.2])
+                r[0].write(formatar_data_br(s['data_solicitacao']))
+                r[1].write(f"**{s['maquinas']['nome']}**")
+                r[2].write(s['status'])
                 
-                ov = s.get('ordem_manual', 0)
-                if b[2].button("🔼", key=f"u{s['id']}"):
-                    if i > 0:
-                        outro = lista[i-1]
-                        supabase.table('solicitacoes').update({"ordem_manual": outro['ordem_manual']}).eq("id", s['id']).execute()
-                        supabase.table('solicitacoes').update({"ordem_manual": ov}).eq("id", outro['id']).execute()
-                        st.rerun()
-                if b[3].button("🔽", key=f"d{s['id']}"):
-                    if i < len(lista) - 1:
-                        outro = lista[i+1]
-                        supabase.table('solicitacoes').update({"ordem_manual": outro['ordem_manual']}).eq("id", s['id']).execute()
-                        supabase.table('solicitacoes').update({"ordem_manual": ov}).eq("id", outro['id']).execute()
-                        st.rerun()
-            if e_admin and b[4].button("🗑️", key=f"x{s['id']}"):
-                supabase.table('solicitacoes').delete().eq("id", s['id']).execute(); st.rerun()
+                p = s['prioridade']
+                if p == "Urgente": r[3].markdown(f'<div class="p-urgente">🔴 {p}</div>', unsafe_allow_html=True)
+                elif p == "Alta": r[3].markdown(f'<div class="p-alta">🟠 {p}</div>', unsafe_allow_html=True)
+                elif p == "Média": r[3].markdown(f'<div class="p-media">🟡 {p}</div>', unsafe_allow_html=True)
+                else: r[3].markdown(f'<div class="p-baixa">🟢 {p}</div>', unsafe_allow_html=True)
+                
+                r[4].write(formatar_data_br(s.get('data_inicio')))
+                r[5].write(formatar_data_br(s.get('data_fim')))
+                r[6].caption(s['descricao'])
+                
+                b = r[7].columns(5)
+                if e_mecanico:
+                    if b[0].button("🏁", key=f"f{s['id']}", help="Finalizar"):
+                        supabase.table('solicitacoes').update({"status":"Finalizado","data_fim":date.today().isoformat()}).eq("id",s['id']).execute(); st.rerun()
+                    if b[1].button("📝", key=f"e{s['id']}", help="Editar"): st.session_state[f"ed{s['id']}"] = True
+                    
+                    ov = s.get('ordem_manual', 0)
+                    if b[2].button("🔼", key=f"u{s['id']}"):
+                        if i > 0:
+                            outro = lista[i-1]
+                            supabase.table('solicitacoes').update({"ordem_manual": outro['ordem_manual']}).eq("id", s['id']).execute()
+                            supabase.table('solicitacoes').update({"ordem_manual": ov}).eq("id", outro['id']).execute()
+                            st.rerun()
+                    if b[3].button("🔽", key=f"d{s['id']}"):
+                        if i < len(lista) - 1:
+                            outro = lista[i+1]
+                            supabase.table('solicitacoes').update({"ordem_manual": outro['ordem_manual']}).eq("id", s['id']).execute()
+                            supabase.table('solicitacoes').update({"ordem_manual": ov}).eq("id", outro['id']).execute()
+                            st.rerun()
+                if e_admin and b[4].button("🗑️", key=f"x{s['id']}"):
+                    supabase.table('solicitacoes').delete().eq("id", s['id']).execute(); st.rerun()
 
-            # --- SUB-INTERFACE DE EDIÇÃO (COM HISTÓRICO CORRIGIDO) ---
-            if st.session_state.get(f"ed{s['id']}", False):
-                with st.container(border=True):
-                    with st.form(f"ed_{s['id']}"):
-                        st.subheader(f"Editar: {s['maquinas']['nome']}")
-                        e1, e2 = st.columns(2)
-                        st_at = e1.selectbox("Status", ["Pendente", "Em andamento", "Finalizado"], index=["Pendente", "Em andamento", "Finalizado"].index(s['status']))
-                        pr_at = e2.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Urgente"], index=["Baixa", "Média", "Alta", "Urgente"].index(s['prioridade']))
-                        
-                        d1, d2 = st.columns(2)
-                        ini_v = datetime.strptime(s['data_inicio'], '%Y-%m-%d').date() if s.get('data_inicio') else None
-                        fim_v = datetime.strptime(s['data_fim'], '%Y-%m-%d').date() if s.get('data_fim') else None
-                        
-                        n_ini = d1.date_input("Início", value=ini_v)
-                        n_fim = d2.date_input("Fim", value=fim_v)
-                        
-                        st.markdown("**Histórico Atual:**")
-                        st.info(s['descricao'])
-                        
-                        ds_add = st.text_area("Adicionar Nova Observação", value="")
-                        
-                        if st.form_submit_button("SALVAR ALTERAÇÕES"):
-                            desc_final = s['descricao']
-                            if ds_add.strip() != "":
-                                data_hoje = date.today().strftime('%d/%m/%y')
-                                # Usamos uma quebra de linha e um ponto para evitar que o markdown aumente a letra
-                                desc_final += f"\n\n**[{data_hoje}]:** {ds_add.strip()}"
-
-                            upd = {
-                                "status": st_at, 
-                                "prioridade": pr_at, 
-                                "descricao": desc_final
-                            }
-                            if n_ini: upd["data_inicio"] = n_ini.isoformat()
-                            if n_fim: upd["data_fim"] = n_fim.isoformat()
+                # --- EDIÇÃO ---
+                if st.session_state.get(f"ed{s['id']}", False):
+                    with st.container(border=True):
+                        with st.form(f"ed_{s['id']}"):
+                            st.subheader(f"Editar OS: {s['maquinas']['nome']}")
+                            e1, e2 = st.columns(2)
+                            st_at = e1.selectbox("Status", ["Pendente", "Em andamento", "Finalizado"], index=["Pendente", "Em andamento", "Finalizado"].index(s['status']))
+                            pr_at = e2.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Urgente"], index=["Baixa", "Média", "Alta", "Urgente"].index(s['prioridade']))
                             
-                            supabase.table('solicitacoes').update(upd).eq("id", s['id']).execute()
+                            d1, d2 = st.columns(2)
+                            ini_v = datetime.strptime(s['data_inicio'], '%Y-%m-%d').date() if s.get('data_inicio') else None
+                            fim_v = datetime.strptime(s['data_fim'], '%Y-%m-%d').date() if s.get('data_fim') else None
+                            n_ini = d1.date_input("Início", value=ini_v)
+                            n_fim = d2.date_input("Fim", value=fim_v)
+                            
+                            st.info(f"Histórico: {s['descricao']}")
+                            ds_add = st.text_area("Nova Observação")
+                            
+                            if st.form_submit_button("SALVAR"):
+                                desc_final = s['descricao']
+                                if ds_add.strip():
+                                    desc_final += f"\n\n**[{date.today().strftime('%d/%m/%y')}]:** {ds_add.strip()}"
+                                
+                                upd = {"status": st_at, "prioridade": pr_at, "descricao": desc_final}
+                                if n_ini: upd["data_inicio"] = n_ini.isoformat()
+                                if n_fim: upd["data_fim"] = n_fim.isoformat()
+                                
+                                supabase.table('solicitacoes').update(upd).eq("id", s['id']).execute()
+                                st.session_state[f"ed{s['id']}"] = False
+                                st.rerun()
+                        if st.button("CANCELAR", key=f"can_{s['id']}"):
                             st.session_state[f"ed{s['id']}"] = False
                             st.rerun()
-                    if st.button("FECHAR", key=f"cl_{s['id']}"):
-                        st.session_state[f"ed{s['id']}"] = False
-                        st.rerun()
+        else:
+            st.info("Nenhum registro encontrado para os filtros selecionados.")
+elif f_id == "":
+    st.info("💡 Selecione os filtros acima e clique em 'FILTRAR' para carregar a fila de manutenção.")
