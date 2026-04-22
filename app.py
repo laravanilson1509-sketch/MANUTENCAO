@@ -150,7 +150,7 @@ with st.sidebar:
                     supabase_admin.table('perfis').insert({"id": u_a.user.id, "email": em, "nivel": nl}).execute()
                     st.success("Criado!")
 
-    with st.expander("🚜 Máquinas"):
+    with st.expander(" Máquinas"):
         if e_mecanico:
             nm = st.text_input("Nova Máquina")
             if st.button("Adicionar") and nm:
