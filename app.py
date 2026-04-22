@@ -97,7 +97,6 @@ def carregar_solicitacoes(maquina_id, nivel, uid):
         return query.order('ordem_manual', desc=True).execute().data
     except: return []
 
-# Otimização do Relatório (Cache para carregar instantâneo)
 @st.cache_data(show_spinner=False)
 def gerar_excel_cache(dados):
     if not dados: return None
@@ -123,11 +122,9 @@ with st.sidebar:
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
 
-    # BOTÃO DE RELATÓRIO NA CONFIGURAÇÃO (Otimizado)
     if 'dados_atuais' in st.session_state and st.session_state.dados_atuais:
         st.divider()
         st.write("📊 Exportar Dados")
-        # Gera o excel apenas se os dados mudarem
         excel_bin = gerar_excel_cache(st.session_state.dados_atuais)
         st.download_button("📥 Baixar Relatório", excel_bin, "relatorio.xlsx", use_container_width=True)
 
@@ -220,7 +217,7 @@ else:
             r[1].write(f"**{s['maquinas']['nome']}**")
             r[2].write(s['status'])
             
-            # PRIORIDADE COM CORES FIXAS
+            # PRIORIDADE COM CORES
             p = s['prioridade']
             if p == "Urgente": r[3].markdown(f'<div class="p-urgente">🔴 {p}</div>', unsafe_allow_html=True)
             elif p == "Alta": r[3].markdown(f'<div class="p-alta">🟠 {p}</div>', unsafe_allow_html=True)
@@ -253,21 +250,42 @@ else:
             if e_admin and b[4].button("🗑️", key=f"x{s['id']}"):
                 supabase.table('solicitacoes').delete().eq("id", s['id']).execute(); st.rerun()
 
+            # --- SUB-INTERFACE DE EDIÇÃO (COM HISTÓRICO CORRIGIDO) ---
             if st.session_state.get(f"ed{s['id']}", False):
                 with st.container(border=True):
                     with st.form(f"ed_{s['id']}"):
                         st.subheader(f"Editar: {s['maquinas']['nome']}")
                         e1, e2 = st.columns(2)
-                        st_at = e1.selectbox("Status", ["Pendente", "Em andamento", "Finalizado"])
-                        pr_at = e2.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Urgente"])
+                        st_at = e1.selectbox("Status", ["Pendente", "Em andamento", "Finalizado"], index=["Pendente", "Em andamento", "Finalizado"].index(s['status']))
+                        pr_at = e2.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Urgente"], index=["Baixa", "Média", "Alta", "Urgente"].index(s['prioridade']))
+                        
                         d1, d2 = st.columns(2)
-                        n_ini = d1.date_input("Início", value=None)
-                        n_fim = d2.date_input("Fim", value=None)
-                        ds_at = st.text_area("Novas Observações", value="")
-                        if st.form_submit_button("SALVAR"):
-                            upd = {"status": st_at, "prioridade": pr_at, "descricao": ds_at if ds_at.strip() != "" else s['descricao']}
+                        ini_v = datetime.strptime(s['data_inicio'], '%Y-%m-%d').date() if s.get('data_inicio') else None
+                        fim_v = datetime.strptime(s['data_fim'], '%Y-%m-%d').date() if s.get('data_fim') else None
+                        
+                        n_ini = d1.date_input("Início", value=ini_v)
+                        n_fim = d2.date_input("Fim", value=fim_v)
+                        
+                        st.markdown("**Histórico Atual:**")
+                        st.info(s['descricao'])
+                        
+                        ds_add = st.text_area("Adicionar Nova Observação", value="")
+                        
+                        if st.form_submit_button("SALVAR ALTERAÇÕES"):
+                            desc_final = s['descricao']
+                            if ds_add.strip() != "":
+                                data_hoje = date.today().strftime('%d/%m/%y')
+                                # Usamos uma quebra de linha e um ponto para evitar que o markdown aumente a letra
+                                desc_final += f"\n\n**[{data_hoje}]:** {ds_add.strip()}"
+
+                            upd = {
+                                "status": st_at, 
+                                "prioridade": pr_at, 
+                                "descricao": desc_final
+                            }
                             if n_ini: upd["data_inicio"] = n_ini.isoformat()
                             if n_fim: upd["data_fim"] = n_fim.isoformat()
+                            
                             supabase.table('solicitacoes').update(upd).eq("id", s['id']).execute()
                             st.session_state[f"ed{s['id']}"] = False
                             st.rerun()
