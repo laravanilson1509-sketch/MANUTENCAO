@@ -139,7 +139,7 @@ with st.sidebar:
                 else: st.error("Mínimo 6 caracteres.")
     
     if e_admin:
-        with st.expander("🔐 Cadastrar Funcionário"):
+        with st.expander(" Cadastrar Funcionário"):
             with st.form("cad_user", clear_on_submit=True):
                 nu = st.text_input("Nome")
                 ns = st.text_input("Senha", type="password")
@@ -150,7 +150,7 @@ with st.sidebar:
                     supabase_admin.table('perfis').insert({"id": u_a.user.id, "email": em, "nivel": nl}).execute()
                     st.success("Criado!")
 
-    with st.expander("🚜 Gestão de Máquinas"):
+    with st.expander(" Gestão de Máquinas"):
         if e_mecanico:
             nm = st.text_input("Nova Máquina")
             if st.button("Adicionar") and nm:
