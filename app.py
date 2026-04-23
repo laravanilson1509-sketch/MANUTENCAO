@@ -151,11 +151,16 @@ u_a = supabase_admin.auth.admin.create_user({
     "email": em, 
     "password": ns, 
     "user_metadata": {"nivel": nv}, # Se você estiver passando o nível aqui
+    # Exemplo de como deve estar o alinhamento
+u_a = supabase_admin.auth.admin.create_user({
+    "email": em, 
+    "password": ns, 
     "email_confirm": True
 })
-                    supabase_admin.table('perfis').insert({"id": u_a.user.id, "email": em, "nivel": nl}).execute()
-                    st.success("Criado!")
 
+# Estas duas linhas abaixo precisam estar na mesma coluna que a 'u_a' acima
+supabase_admin.table('perfis').insert({"id": u_a.user.id, "email": em, "nivel": nl}).execute()
+st.success("Criado!")
     with st.expander(" Gestão de Máquinas"):
         if e_mecanico:
             nm = st.text_input("Nova Máquina")
