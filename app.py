@@ -146,7 +146,13 @@ with st.sidebar:
                 nl = st.selectbox("Perfil", ["operador", "mecanico", "admin"])
                 if st.form_submit_button("Criar"):
                     em = f"{nu.strip().lower()}@inovaflex.com"
-                    u_a = supabase_admin.auth.admin.create_user({"email": em, "password": ns, "email_confirm": True})
+                    # Altere a linha 149 para isso:
+u_a = supabase_admin.auth.admin.create_user({
+    "email": em, 
+    "password": ns, 
+    "user_metadata": {"nivel": nv}, # Se você estiver passando o nível aqui
+    "email_confirm": True
+})
                     supabase_admin.table('perfis').insert({"id": u_a.user.id, "email": em, "nivel": nl}).execute()
                     st.success("Criado!")
 
