@@ -139,29 +139,29 @@ with st.sidebar:
                 else: st.error("Mínimo 6 caracteres.")
     
     if e_admin:
-        with st.expander(" Cadastrar Funcionário"):
+        with st.expander("👤 Cadastrar Funcionário"):
             with st.form("cad_user", clear_on_submit=True):
                 nu = st.text_input("Nome")
                 ns = st.text_input("Senha", type="password")
                 nl = st.selectbox("Perfil", ["operador", "mecanico", "admin"])
                 if st.form_submit_button("Criar"):
-                    em = f"{nu.strip().lower()}@inovaflex.com"
-                    # Altere a linha 149 para isso:
-u_a = supabase_admin.auth.admin.create_user({
-    "email": em, 
-    "password": ns, 
-    "user_metadata": {"nivel": nv}, # Se você estiver passando o nível aqui
-    # Exemplo de como deve estar o alinhamento
-u_a = supabase_admin.auth.admin.create_user({
-    "email": em, 
-    "password": ns, 
-    "email_confirm": True
-})
+                    try:
+                        em = f"{nu.strip().lower()}@inovaflex.com"
+                        u_a = supabase_admin.auth.admin.create_user({
+                            "email": em, 
+                            "password": ns, 
+                            "email_confirm": True
+                        })
+                        supabase_admin.table('perfis').insert({
+                            "id": u_a.user.id, 
+                            "email": em, 
+                            "nivel": nl
+                        }).execute()
+                        st.success(f"Funcionário {nu} criado!")
+                    except Exception as e:
+                        st.error(f"Erro ao criar: {e}")
 
-# Estas duas linhas abaixo precisam estar na mesma coluna que a 'u_a' acima
-supabase_admin.table('perfis').insert({"id": u_a.user.id, "email": em, "nivel": nl}).execute()
-st.success("Criado!")
-    with st.expander(" Gestão de Máquinas"):
+    with st.expander("🏭 Gestão de Máquinas"):
         if e_mecanico:
             nm = st.text_input("Nova Máquina")
             if st.button("Adicionar") and nm:
@@ -170,20 +170,14 @@ st.success("Criado!")
         for q in maquinas_raw:
             c1, c2, c3 = st.columns([3, 1, 1])
             c1.caption(f"📍 {q['nome']}")
-            
-            # Editar Nome da Máquina
             if e_mecanico and c2.button("📝", key=f"ed_mq_{q['id']}"):
                 st.session_state[f"edit_mode_mq_{q['id']}"] = True
-            
-            # Deletar Máquina (Com regra de integridade)
             if e_mecanico and c3.button("🗑️", key=f"mq_{q['id']}"):
                 check = supabase.table('solicitacoes').select('id', count='exact').eq('maquina_id', q['id']).execute()
                 if check.count > 0:
-                    st.error(f"Não é possível excluir. A máquina '{q['nome']}' possui {check.count} registros.")
+                    st.error(f"Não é possível excluir. A máquina '{q['nome']}' possui registros.")
                 else:
                     supabase.table('maquinas').delete().eq("id", q['id']).execute(); st.rerun()
-            
-            # Sub-form para editar nome
             if st.session_state.get(f"edit_mode_mq_{q['id']}", False):
                 with st.form(f"f_ed_mq_{q['id']}"):
                     novo_nome = st.text_input("Novo nome:", value=q['nome'])
@@ -238,7 +232,6 @@ with st.container(border=True):
             st.session_state.dados_atuais = []
             st.rerun()
 
-# Lógica de Gatilho do Filtro
 if btn_filtrar or (f_id != "" and 'dados_atuais' in st.session_state):
     if f_id == "":
         st.warning("Selecione pelo menos uma máquina ou 'Todas' para filtrar.")
@@ -289,7 +282,6 @@ if btn_filtrar or (f_id != "" and 'dados_atuais' in st.session_state):
                 if e_admin and b[4].button("🗑️", key=f"x{s['id']}"):
                     supabase.table('solicitacoes').delete().eq("id", s['id']).execute(); st.rerun()
 
-                # --- EDIÇÃO ---
                 if st.session_state.get(f"ed{s['id']}", False):
                     with st.container(border=True):
                         with st.form(f"ed_{s['id']}"):
@@ -297,25 +289,19 @@ if btn_filtrar or (f_id != "" and 'dados_atuais' in st.session_state):
                             e1, e2 = st.columns(2)
                             st_at = e1.selectbox("Status", ["Pendente", "Em andamento", "Finalizado"], index=["Pendente", "Em andamento", "Finalizado"].index(s['status']))
                             pr_at = e2.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Urgente"], index=["Baixa", "Média", "Alta", "Urgente"].index(s['prioridade']))
-                            
                             d1, d2 = st.columns(2)
                             ini_v = datetime.strptime(s['data_inicio'], '%Y-%m-%d').date() if s.get('data_inicio') else None
                             fim_v = datetime.strptime(s['data_fim'], '%Y-%m-%d').date() if s.get('data_fim') else None
                             n_ini = d1.date_input("Início", value=ini_v)
                             n_fim = d2.date_input("Fim", value=fim_v)
-                            
                             st.info(f"Histórico: {s['descricao']}")
                             ds_add = st.text_area("Nova Observação")
-                            
                             if st.form_submit_button("SALVAR"):
                                 desc_final = s['descricao']
-                                if ds_add.strip():
-                                    desc_final += f"\n\n**[{date.today().strftime('%d/%m/%y')}]:** {ds_add.strip()}"
-                                
+                                if ds_add.strip(): desc_final += f"\n\n**[{date.today().strftime('%d/%m/%y')}]:** {ds_add.strip()}"
                                 upd = {"status": st_at, "prioridade": pr_at, "descricao": desc_final}
                                 if n_ini: upd["data_inicio"] = n_ini.isoformat()
                                 if n_fim: upd["data_fim"] = n_fim.isoformat()
-                                
                                 supabase.table('solicitacoes').update(upd).eq("id", s['id']).execute()
                                 st.session_state[f"ed{s['id']}"] = False
                                 st.rerun()
