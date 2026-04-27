@@ -6,7 +6,7 @@ from supabase import create_client, Client
 from supabase.lib.client_options import ClientOptions
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="INOVAFLEX - Gestão", layout="wide", page_icon="🔧")ges
+st.set_page_config(page_title="INOVAFLEX - Gestão", layout="wide", page_icon="🔧")
 
 st.markdown("""
     <style>
