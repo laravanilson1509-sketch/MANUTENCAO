@@ -6,7 +6,7 @@ from supabase import create_client, Client
 from supabase.lib.client_options import ClientOptions
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="INOVAFLEX - Gestão", layout="wide", page_icon="🔧")
+st.set_page_config(page_title="INOVAFLEX - Gestão", layout="wide", page_icon="🔧")ges
 
 st.markdown("""
     <style>
@@ -161,7 +161,7 @@ with st.sidebar:
                     except Exception as e:
                         st.error(f"Erro ao criar: {e}")
 
-    with st.expander("🏭 Gestão de Máquinas"):
+    with st.expander("🏭 Cadastro de Máquinas"):
         if e_mecanico:
             nm = st.text_input("Nova Máquina")
             if st.button("Adicionar") and nm:
