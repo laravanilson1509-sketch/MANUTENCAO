@@ -1,17 +1,16 @@
-from base_request_builder import (
-    APIResponse,
-    BaseFilterRequestBuilder,
-    BaseRPCRequestBuilder,
-    BaseSelectRequestBuilder,
-    CountMethod,
-    RequestConfig,
-    SingleAPIResponse,
-    pre_delete,
-    pre_insert,
-    pre_select,
-    pre_update,
-    pre_upsert,
-)
+import streamlit as st
+from supabase import create_client, Client
+
+SUPABASE_URL = "SUA_URL"
+SUPABASE_KEY = "SUA_KEY"
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+st.title("Teste Supabase")
+
+res = supabase.table("sua_tabela").select("*").execute()
+
+st.write(res.data)
 from ..exceptions import APIError, APIErrorFromJSON, generate_default_error_message
 from ..types import JSON, ReturnMethod
 from ..utils import model_validate_json
