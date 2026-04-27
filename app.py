@@ -7,11 +7,7 @@ from pydantic import ValidationError
 from typing_extensions import override
 from yarl import URL
 
-# Em vez de: from ..base_request_builder import ...
-# Tente importar diretamente se estiver no mesmo nível ou subpasta:
-from base_request_builder import (
-    # as classes/funções aqui
-)
+from ..base_request_builder import (
     APIResponse,
     BaseFilterRequestBuilder,
     BaseRPCRequestBuilder,
