@@ -309,7 +309,7 @@ elif tela_selecionada == "📦 Estoque de Peças":
                     if st.form_submit_button("❌ FECHAR"): st.session_state[f"aj_e_{p['id']}"] = False; st.rerun()
     else: st.info("Nenhum item ativo encontrado.")
 
-elif tela_selecionada == "⚙️ Painel Admin":
+elif tela_selecionada == "⚙️ Cadastros":
     st.title("⚙️ Administração")
     if st.session_state['user_level'] != 'admin': st.error("Acesso negado.")
     else:
