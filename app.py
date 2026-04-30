@@ -16,6 +16,7 @@ if 'tela_selecionada' not in st.session_state: st.session_state.tela_selecionada
 
 st.markdown("""
 <style>
+    /* Estilos Gerais e Botões */
     button[kind="primary"], button[kind="secondary"], button[kind="tertiary"] {
         display: flex !important; justify-content: center !important; align-items: center !important;
         padding: 0px !important; min-height: 35px !important;
@@ -26,6 +27,7 @@ st.markdown("""
     }
     [data-testid="column"] { display: flex !important; justify-content: center !important; align-items: center !important; }
     
+    /* Prioridades */
     .p-urgente { color: #ff4b4b !important; font-weight: bold; border-left: 4px solid #ff4b4b; padding-left: 8px; background: rgba(255, 75, 75, 0.1); width: 100%; text-align: center; }
     .p-alta { color: #ffa500 !important; font-weight: bold; border-left: 4px solid #ffa500; padding-left: 8px; background: rgba(255, 165, 0, 0.1); width: 100%; text-align: center; }
     .p-media { color: #f1c40f !important; font-weight: bold; border-left: 4px solid #f1c40f; padding-left: 8px; background: rgba(241, 196, 15, 0.1); width: 100%; text-align: center; }
@@ -46,7 +48,6 @@ SERVICE = st.secrets.get("SUPABASE_SERVICE_KEY")
 
 @st.cache_resource
 def conectar_admin():
-    # USAR SERVICE_KEY PARA BYPASS DE RLS E ADMIN AUTH
     return create_client(URL, SERVICE)
 
 supabase_admin = conectar_admin()
@@ -82,8 +83,9 @@ if not st.session_state.authenticated:
                 realizar_login(u_input, p_input)
     st.stop()
 
-# --- 4. CLIENTE SUPABASE DO USUÁRIO ---
+# --- 4. CLIENTE SUPABASE DO USUÁRIO (Protegido contra KeyError) ---
 try:
+    # Só tenta criar as opções se o token existir no session_state
     if 'user_token' in st.session_state:
         opts = ClientOptions(headers={"Authorization": f"Bearer {st.session_state['user_token']}"})
         supabase = create_client(URL, ANON, options=opts)
@@ -265,7 +267,6 @@ elif tela_selecionada == "⚙️ Cadastros":
                 if st.form_submit_button("CADASTRAR USUÁRIO", type="primary"):
                     if email_u and pass_u:
                         try:
-                            # TENTATIVA COM SUPABASE_ADMIN (SERVICE_ROLE)
                             full_email = f"{email_u}@inovaflex.com"
                             response = supabase_admin.auth.admin.create_user({
                                 "email": full_email,
@@ -279,6 +280,6 @@ elif tela_selecionada == "⚙️ Cadastros":
                                 }).execute()
                                 st.success(f"Usuário {full_email} criado!")
                         except Exception as e:
-                            st.error(f"Erro de Autorização: Certifique-se de que a SERVICE_KEY está correta. Detalhe: {e}")
+                            st.error(f"Erro: {e}")
                     else:
                         st.error("Preencha todos os campos.")
