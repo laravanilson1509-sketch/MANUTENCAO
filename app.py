@@ -6,7 +6,7 @@ from supabase import create_client, Client
 from supabase.lib.client_options import ClientOptions
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="INOVA FLEX - Gestão", layout="wide", page_icon="🔧")
+st.set_page_config(page_title="PLANILHA DE MANUTENÇÃO - Gestão", layout="wide", page_icon="🔧")
 
 # Inicialização de Session States
 if 'authenticated' not in st.session_state:
