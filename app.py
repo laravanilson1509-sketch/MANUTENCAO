@@ -6,13 +6,9 @@ from supabase import create_client, Client
 from supabase.lib.client_options import ClientOptions
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="PLANILHA DE MANUTENÇÃO - Gestão", layout="wide", page_icon="🔧")
+st.set_page_config(page_title="PLANILHA DE MANUTENÇÃO", layout="wide", page_icon="🔧")
 
 # Inicialização de Session States
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
-if 'user_nickname' not in st.session_state:
-    st.session_state.user_nickname = ""
 if 'dados_f' not in st.session_state:
     st.session_state.dados_f = None
 if 'f_key' not in st.session_state:
@@ -52,54 +48,10 @@ def conectar_admin():
 
 supabase_admin = conectar_admin()
 
-# --- 3. LÓGICA DE LOGIN (CALLBACK PARA 1 CLIQUE) ---
-def btn_login_callback():
-    # Acessando diretamente do session_state para evitar erro de campos vazios
-    u = st.session_state.get('login_user_input', '').strip()
-    p = st.session_state.get('login_pass_input', '').strip()
-    
-    if not u or not p:
-        st.error("Preencha todos os campos corretamente.")
-        return
-        
-    try:
-        u_limpo = u.lower()
-        res = supabase_admin.auth.sign_in_with_password({"email": f"{u_limpo}@inovaflex.com", "password": p})
-        
-        if res.user:
-            perfil = supabase_admin.table('perfis').select('nivel').eq('id', res.user.id).execute()
-            if perfil.data:
-                st.session_state.authenticated = True
-                st.session_state.user_token = res.session.access_token
-                st.session_state.user_id = res.user.id
-                st.session_state.user_nickname = u_limpo.upper()
-                st.session_state.user_level = perfil.data[0]['nivel']
-            else:
-                st.error("Perfil não encontrado no banco de dados.")
-    except Exception as e:
-        st.error("Usuário ou senha inválidos.")
-
-# Tela de Login
-if not st.session_state.authenticated:
-    st.markdown("<h2 style='text-align:center; color:#0052cc; margin-top:50px;'>INOVA FLEX</h2>", unsafe_allow_html=True)
-    col_l1, col_l2, col_l3 = st.columns([1,1,1])
-    with col_l2:
-        st.text_input("Usuário", key="login_user_input")
-        st.text_input("Senha", type="password", key="login_pass_input")
-        st.button("ENTRAR", use_container_width=True, on_click=btn_login_callback, type="primary")
-    st.stop()
-
-# --- ABAIXO SÓ EXECUTA SE AUTENTICADO ---
-try:
-    opts = ClientOptions(headers={"Authorization": f"Bearer {st.session_state['user_token']}"})
-    supabase = create_client(URL, ANON, options=opts)
-except:
-    supabase = supabase_admin
-
-# --- 4. FUNÇÕES DE DADOS ---
+# --- 3. FUNÇÕES DE DADOS ---
 def carregar_listas():
     try:
-        q = supabase.table('maquinas').select('id, nome').order('nome').execute()
+        q = supabase_admin.table('maquinas').select('id, nome').order('nome').execute()
         return q.data if q.data else []
     except: return []
 
@@ -109,10 +61,9 @@ def carregar_usuarios_cadastrados():
         return [u['nome'] for u in q.data] if q.data else []
     except: return []
 
-def carregar_solicitacoes(maquina_id, nivel, uid, f_status="TODOS", f_prioridade="TODAS"):
+def carregar_solicitacoes(maquina_id, f_status="TODOS", f_prioridade="TODAS"):
     try:
-        query = supabase.table('solicitacoes').select('*, maquinas(nome)')
-        if nivel == 'operador': query = query.eq('criado_por_uuid', uid)
+        query = supabase_admin.table('solicitacoes').select('*, maquinas(nome)')
         if maquina_id and maquina_id != "TODOS": query = query.eq('maquina_id', maquina_id)
         if f_status != "TODOS": query = query.eq('status', f_status)
         else: query = query.neq('status', 'FINALIZADO')
@@ -124,10 +75,9 @@ def carregar_solicitacoes(maquina_id, nivel, uid, f_status="TODOS", f_prioridade
 maquinas_raw = carregar_listas()
 usuarios_lista = carregar_usuarios_cadastrados()
 
-# --- 5. SIDEBAR ---
+# --- 4. SIDEBAR ---
 with st.sidebar:
-    st.markdown("<div style='background: linear-gradient(135deg, #003366 0%, #0052cc 100%); padding: 20px; border-radius: 15px; text-align: center; margin-bottom: 20px;'><h2 style='color: white; margin: 0; font-size: 1.5em;'>🔧 INOVA FLEX</h2></div>", unsafe_allow_html=True)
-    st.markdown(f"<div style='padding:10px; background:#1e1e1e; border-radius:10px; margin-bottom:15px; color:#007bff; font-weight:bold; text-align:center;'>👤 {st.session_state.user_nickname}</div>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center; color:#0052cc; margin-top:10px;'>🔧 PLANILHA DE MANUTENÇÃO</h2>", unsafe_allow_html=True)
     
     if st.button("📋 Fila de Manutenção", use_container_width=True):
         st.session_state.tela_selecionada = "📋 Fila de Manutenção"
@@ -135,13 +85,8 @@ with st.sidebar:
     if st.button("⚙️ Cadastros", use_container_width=True):
         st.session_state.tela_selecionada = "⚙️ Cadastros"
         st.rerun()
-    
-    st.divider()
-    if st.button("🚪 SAIR", use_container_width=True):
-        for k in list(st.session_state.keys()): del st.session_state[k]
-        st.rerun()
 
-# --- 6. TELAS ---
+# --- 5. TELAS ---
 if st.session_state.tela_selecionada == "📋 Fila de Manutenção":
     st.title("📋 Fila de Manutenção")
     
@@ -156,14 +101,13 @@ if st.session_state.tela_selecionada == "📋 Fila de Manutenção":
             if st.form_submit_button("🚀 GERAR OS", type="primary"):
                 if mq != "SELECIONE..." and solicitante != "SELECIONE..." and ds.strip():
                     mid = next(m['id'] for m in maquinas_raw if m['nome'].upper() == mq)
-                    supabase.table('solicitacoes').insert({
+                    supabase_admin.table('solicitacoes').insert({
                         "maquina_id": mid, 
                         "descricao": ds, 
                         "prioridade": pr, 
                         "solicitante_nome": solicitante, 
                         "status": "PENDENTE", 
                         "data_solicitacao": date.today().isoformat(), 
-                        "criado_por_uuid": st.session_state.user_id, 
                         "ordem_manual": int(datetime.now().timestamp())
                     }).execute()
                     st.session_state.dados_f = None
@@ -180,7 +124,7 @@ if st.session_state.tela_selecionada == "📋 Fila de Manutenção":
         f_pr = c3.selectbox("🔥 Prioridade:", ["TODAS", "BAIXA", "MÉDIA", "ALTA", "URGENTE"], key=f"filt_pr_{st.session_state.f_key}")
         
         if c4.button("🔍 FILTRAR", type="primary", use_container_width=True):
-            st.session_state.dados_f = carregar_solicitacoes(f_mq, st.session_state.user_level, st.session_state.user_id, f_st, f_pr)
+            st.session_state.dados_f = carregar_solicitacoes(f_mq, f_st, f_pr)
             st.rerun()
         if c5.button("🧹 LIMPAR", use_container_width=True):
             st.session_state.f_key += 1
@@ -213,22 +157,22 @@ if st.session_state.tela_selecionada == "📋 Fila de Manutenção":
             
             btn = r[8].columns(5)
             if btn[0].button("🏁", key=f"fin_{s['id']}", help="Finalizar"):
-                supabase.table('solicitacoes').update({"status":"FINALIZADO","data_fim":date.today().isoformat()}).eq("id",s['id']).execute()
+                supabase_admin.table('solicitacoes').update({"status":"FINALIZADO","data_fim":date.today().isoformat()}).eq("id",s['id']).execute()
                 st.session_state.dados_f = None
                 st.rerun()
             if btn[1].button("📝", key=f"edt_{s['id']}", help="Editar"):
                 st.session_state[f"ed_{s['id']}"] = True
                 st.rerun()
             if btn[2].button("⬆️", key=f"up_{s['id']}", help="Subir Fila"):
-                supabase.table('solicitacoes').update({"ordem_manual":int(datetime.now().timestamp())}).eq("id",s['id']).execute()
+                supabase_admin.table('solicitacoes').update({"ordem_manual":int(datetime.now().timestamp())}).eq("id",s['id']).execute()
                 st.session_state.dados_f = None
                 st.rerun()
             if btn[3].button("⬇️", key=f"down_{s['id']}", help="Descer Fila"):
-                supabase.table('solicitacoes').update({"ordem_manual":int(datetime.now().timestamp()) * -1}).eq("id",s['id']).execute()
+                supabase_admin.table('solicitacoes').update({"ordem_manual":int(datetime.now().timestamp()) * -1}).eq("id",s['id']).execute()
                 st.session_state.dados_f = None
                 st.rerun()
             if btn[4].button("🗑️", key=f"del_{s['id']}"):
-                supabase.table('solicitacoes').delete().eq("id",s['id']).execute()
+                supabase_admin.table('solicitacoes').delete().eq("id",s['id']).execute()
                 st.session_state.dados_f = None
                 st.rerun()
 
@@ -248,7 +192,7 @@ if st.session_state.tela_selecionada == "📋 Fila de Manutenção":
                         ds_n = st.text_area("Descrição", value=s['descricao'])
                         
                         if st.form_submit_button("💾 SALVAR ALTERAÇÕES"):
-                            supabase.table('solicitacoes').update({
+                            supabase_admin.table('solicitacoes').update({
                                 "status":st_n, 
                                 "prioridade":pr_n, 
                                 "descricao":ds_n, 
